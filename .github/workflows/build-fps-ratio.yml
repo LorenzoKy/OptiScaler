@@ -1,0 +1,22 @@
+name: Build FPS ratio test DLL
+on:
+  push:
+    branches: [ "ci/build-fps-ratio" ]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        run: msbuild OptiScaler.sln /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Upload Release DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: OptiScaler-fps-ratio
+          path: x64/Release/a/OptiScaler.dll
+          if-no-files-found: error
