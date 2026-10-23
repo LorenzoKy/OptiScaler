@@ -795,6 +795,10 @@ class Config
     std::string ExportOverlaySettings();
     bool ImportOverlaySettings(const std::string& code);
 
+    // A preset's settings, the code's text without base64: Key=Value lines, keys without the FpsOverlay prefix.
+    // ShowFps stays as it is.
+    bool ApplyOverlayPreset(std::string_view text);
+
     static Config* Instance();
 
   private:
@@ -809,6 +813,7 @@ class Config
     // The FPS overlay's keys of the Menu section: read when loading the ini, or assigned for a pasted code
     void ReadOverlaySettings(bool assign);
     void WriteOverlaySettings();
+    bool ApplyOverlayText(const std::string& text); // A code's text, what it doesn't list goes back to the default
 
     std::optional<std::string> readString(std::string section, std::string key, bool lowercase = false);
     std::optional<std::wstring> readWString(std::string section, std::string key, bool lowercase = false);

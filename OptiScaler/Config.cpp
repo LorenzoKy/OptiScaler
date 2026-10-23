@@ -1163,9 +1163,27 @@ bool Config::ImportOverlaySettings(const std::string& code)
     if (!text.has_value())
         return false;
 
+    return ApplyOverlayText(text.value());
+}
+
+bool Config::ApplyOverlayPreset(std::string_view text)
+{
+    const auto showFps = ShowFps.value_for_config();
+
+    if (!ApplyOverlayText(std::string(text)))
+        return false;
+
+    if (showFps.has_value())
+        ShowFps = showFps.value();
+
+    return true;
+}
+
+bool Config::ApplyOverlayText(const std::string& text)
+{
     // Known keys only, their values are checked as the ini's are
     std::vector<std::pair<const char*, std::string>> values;
-    std::istringstream lines(text.value());
+    std::istringstream lines(text);
     std::string line;
 
     while (std::getline(lines, line))
@@ -1192,7 +1210,7 @@ bool Config::ImportOverlaySettings(const std::string& code)
     }
 
     // Nothing known in a code that isn't empty, a code of a later version or a broken one
-    if (values.empty() && !text->empty())
+    if (values.empty() && !text.empty())
         return false;
 
     // Everything it doesn't list back to the default

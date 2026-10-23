@@ -1083,7 +1083,7 @@ namespace
 struct PresentedFrame
 {
     uint64_t simStartUs;
-    std::function<bool()> waitGpuEnd; // Blocks until the frame's GPU work is done, false on a timeout or failure
+    std::function<std::optional<uint64_t>()> waitGpuEnd; // Blocks until the frame's GPU work is done, its end time
 };
 
 std::mutex pclMutex;
@@ -1108,11 +1108,14 @@ std::deque<FgGameFrame> fgGameFrames;
 FgGameFrame fgPresentingFrame;
 std::atomic_uint64_t fgGamePresentUs = 0;
 
-// Simulation start to GPU end of the last measured frames, in us: first present (render) and last present (display)
+// Simulation start to GPU end of the last measured frames, in us: a game frame's first present (render) and every
+// present shown, generated ones too, with its game frame's simulation start (display, as PresentMon's PC latency)
 std::array<uint32_t, 64> pclLatencies {};
-std::array<uint32_t, 64> pclDisplayLatencies {};
 size_t pclLatencyCount = 0;
 size_t pclLatencyHead = 0;
+std::array<uint32_t, 128> pclPresentLatencies {};
+size_t pclPresentCount = 0;
+size_t pclPresentHead = 0;
 uint64_t pclLastMeasuredUs = 0;
 
 // Frames are only tracked while the overlay asks for the latency
@@ -1154,6 +1157,9 @@ template <typename TFence> std::shared_ptr<TFence> SharedFence(TFence* fence)
 
 void PclWorker()
 {
+    // Without GPU timestamps the frame ends when this thread wakes up, which a busy CPU delays
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+
     std::unique_lock lock(pclMutex);
 
     while (true)
@@ -1170,33 +1176,38 @@ void PclWorker()
         pclPending.pop_front();
         lock.unlock();
 
-        const bool done = frame.waitGpuEnd();
-        const auto endUs = NowUs();
+        const auto gpuEndUs = frame.waitGpuEnd();
         frame.waitGpuEnd = nullptr;
 
         lock.lock();
 
-        if (!done || endUs <= frame.simStartUs || endUs - frame.simStartUs >= pclMaxLatencyUs)
+        if (!gpuEndUs.has_value())
             continue;
 
-        // A game frame's presents end in order: with frame generation its first present ends right after the game's
-        // base render and frame generation pass finish on the GPU, while its last present is the real frame shown
-        static uint64_t frameSimStartUs = 0;
-        static size_t frameSlot = 0;
+        const auto endUs = gpuEndUs.value();
+
+        if (endUs <= frame.simStartUs || endUs - frame.simStartUs >= pclMaxLatencyUs)
+            continue;
+
+        // PresentMon gives every present shown its own PC latency, a generated one takes the game frame's simulation
+        // start as the real one after it does
         const uint32_t elapsedUs = static_cast<uint32_t>(endUs - frame.simStartUs);
 
+        pclPresentLatencies[pclPresentHead] = elapsedUs;
+        pclPresentHead = (pclPresentHead + 1) % pclPresentLatencies.size();
+        pclPresentCount = std::min(pclPresentCount + 1, pclPresentLatencies.size());
+        pclLastMeasuredUs = endUs;
+
+        // A game frame's presents end in order: with frame generation its first present ends right after the game's
+        // base render and frame generation pass finish on the GPU
+        static uint64_t frameSimStartUs = 0;
+
         if (frame.simStartUs == frameSimStartUs && pclLatencyCount > 0)
-        {
-            pclDisplayLatencies[frameSlot] = std::max(pclDisplayLatencies[frameSlot], elapsedUs);
-            pclLastMeasuredUs = endUs;
             continue;
-        }
 
         frameSimStartUs = frame.simStartUs;
-        frameSlot = pclLatencyHead;
 
         pclLatencies[pclLatencyHead] = elapsedUs;
-        pclDisplayLatencies[pclLatencyHead] = elapsedUs;
         pclLatencyHead = (pclLatencyHead + 1) % pclLatencies.size();
         pclLatencyCount = std::min(pclLatencyCount + 1, pclLatencies.size());
         pclLastMeasuredUs = endUs;
@@ -1431,7 +1442,9 @@ std::optional<uint64_t> InputCommon::take_present_sim_start()
     return fgPresentingFrame.simStartUs;
 }
 
-void InputCommon::track_present_gpu_end(uint64_t simStartUs, std::function<bool()> waitGpuEnd)
+namespace
+{
+void QueuePresentedFrame(uint64_t simStartUs, std::function<std::optional<uint64_t>()> waitGpuEnd)
 {
     std::lock_guard lock(pclMutex);
 
@@ -1447,6 +1460,222 @@ void InputCommon::track_present_gpu_end(uint64_t simStartUs, std::function<bool(
     pclCv.notify_one();
 }
 
+// A timestamp the present's queue writes after the present, the GPU's own time of its end. The slots are reused once
+// the worker read them, more than the frames it can have queued and waiting.
+constexpr size_t pclTimestampSlots = 2 * pclMaxPending + 2;
+
+struct GpuTimestamps
+{
+    ID3D12CommandQueue* queue = nullptr;
+    ID3D12QueryHeap* heap = nullptr;
+    ID3D12Resource* readback = nullptr;
+    const uint64_t* results = nullptr;
+    ID3D12Fence* fence = nullptr;
+    uint64_t fenceValue = 0;
+    uint64_t frequency = 0;
+    size_t nextSlot = 0;
+    std::array<ID3D12CommandAllocator*, pclTimestampSlots> allocators {};
+    std::array<ID3D12GraphicsCommandList*, pclTimestampSlots> lists {};
+    std::array<uint64_t, pclTimestampSlots> slotFenceValues {};
+    std::array<std::atomic_bool, pclTimestampSlots> slotRead {};
+
+    ~GpuTimestamps()
+    {
+        // Lists the GPU may still run are left alone, after a hang or a device removal
+        if (fence != nullptr && fenceValue != 0 && !WaitForFence(fence, fenceValue))
+            return;
+
+        for (auto list : lists)
+        {
+            if (list != nullptr)
+                list->Release();
+        }
+
+        for (auto allocator : allocators)
+        {
+            if (allocator != nullptr)
+                allocator->Release();
+        }
+
+        if (readback != nullptr)
+        {
+            if (results != nullptr)
+                readback->Unmap(0, nullptr);
+
+            readback->Release();
+        }
+
+        if (heap != nullptr)
+            heap->Release();
+
+        if (fence != nullptr)
+            fence->Release();
+
+        if (queue != nullptr)
+            queue->Release();
+    }
+
+    bool Init(ID3D12CommandQueue* presentQueue, ID3D12Device* device)
+    {
+        const auto queueDesc = presentQueue->GetDesc();
+        D3D12_QUERY_HEAP_DESC heapDesc {};
+        heapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+        heapDesc.Count = static_cast<UINT>(pclTimestampSlots);
+
+        // A copy queue only has timestamps where the driver supports them
+        if (queueDesc.Type == D3D12_COMMAND_LIST_TYPE_COPY)
+        {
+            D3D12_FEATURE_DATA_D3D12_OPTIONS3 options3 {};
+            if (device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS3, &options3, sizeof(options3)) != S_OK ||
+                !options3.CopyQueueTimestampQueriesSupported)
+            {
+                return false;
+            }
+
+            heapDesc.Type = D3D12_QUERY_HEAP_TYPE_COPY_QUEUE_TIMESTAMP;
+        }
+        else if (queueDesc.Type != D3D12_COMMAND_LIST_TYPE_DIRECT && queueDesc.Type != D3D12_COMMAND_LIST_TYPE_COMPUTE)
+        {
+            return false;
+        }
+
+        presentQueue->AddRef();
+        queue = presentQueue;
+
+        if (queue->GetTimestampFrequency(&frequency) != S_OK || frequency == 0)
+            return false;
+
+        if (device->CreateQueryHeap(&heapDesc, IID_PPV_ARGS(&heap)) != S_OK)
+            return false;
+
+        D3D12_HEAP_PROPERTIES heapProps {};
+        heapProps.Type = D3D12_HEAP_TYPE_READBACK;
+
+        D3D12_RESOURCE_DESC bufferDesc {};
+        bufferDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        bufferDesc.Width = sizeof(uint64_t) * pclTimestampSlots;
+        bufferDesc.Height = 1;
+        bufferDesc.DepthOrArraySize = 1;
+        bufferDesc.MipLevels = 1;
+        bufferDesc.SampleDesc.Count = 1;
+        bufferDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+        if (device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &bufferDesc,
+                                            D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback)) != S_OK)
+        {
+            return false;
+        }
+
+        // Readback buffers can stay mapped, every read waits for the slot's fence
+        void* mapped = nullptr;
+        if (readback->Map(0, nullptr, &mapped) != S_OK)
+            return false;
+
+        results = static_cast<const uint64_t*>(mapped);
+
+        if (device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)) != S_OK)
+            return false;
+
+        for (size_t i = 0; i < pclTimestampSlots; i++)
+        {
+            if (device->CreateCommandAllocator(queueDesc.Type, IID_PPV_ARGS(&allocators[i])) != S_OK ||
+                device->CreateCommandList(0, queueDesc.Type, allocators[i], nullptr, IID_PPV_ARGS(&lists[i])) != S_OK ||
+                lists[i]->Close() != S_OK)
+            {
+                return false;
+            }
+
+            slotRead[i] = true;
+        }
+
+        return true;
+    }
+
+    // The slot written after the present and its fence value, nullopt when it can't be written
+    std::optional<std::pair<size_t, uint64_t>> Write()
+    {
+        const size_t slot = nextSlot;
+
+        // Still waited on by the worker or the GPU
+        if (!slotRead[slot] || fence->GetCompletedValue() < slotFenceValues[slot])
+            return std::nullopt;
+
+        auto list = lists[slot];
+
+        if (allocators[slot]->Reset() != S_OK || list->Reset(allocators[slot], nullptr) != S_OK)
+            return std::nullopt;
+
+        const auto index = static_cast<UINT>(slot);
+        list->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, index);
+        list->ResolveQueryData(heap, D3D12_QUERY_TYPE_TIMESTAMP, index, 1, readback, sizeof(uint64_t) * slot);
+
+        if (list->Close() != S_OK)
+            return std::nullopt;
+
+        ID3D12CommandList* submit[] = { list };
+        queue->ExecuteCommandLists(1, submit);
+
+        if (queue->Signal(fence, fenceValue + 1) != S_OK)
+            return std::nullopt;
+
+        slotFenceValues[slot] = ++fenceValue;
+        slotRead[slot] = false;
+        nextSlot = (slot + 1) % pclTimestampSlots;
+
+        return std::pair(slot, fenceValue);
+    }
+
+    // The slot's GPU time as NowUs(), from the queue's GPU clock and the CPU's taken together
+    std::optional<uint64_t> Read(size_t slot, uint64_t value)
+    {
+        std::optional<uint64_t> endUs;
+
+        if (WaitForFence(fence, value))
+        {
+            const uint64_t ticks = results[slot];
+            uint64_t gpuNow = 0;
+            uint64_t cpuNow = 0;
+
+            if (ticks != 0 && queue->GetClockCalibration(&gpuNow, &cpuNow) == S_OK && gpuNow >= ticks)
+            {
+                // The calibration's QPC time to now, so a preemption in between doesn't count
+                LARGE_INTEGER qpcNow {};
+                LARGE_INTEGER qpcFrequency {};
+                QueryPerformanceCounter(&qpcNow);
+                QueryPerformanceFrequency(&qpcFrequency);
+                const auto nowUs = NowUs();
+
+                const double sinceCalibrationUs =
+                    qpcNow.QuadPart > static_cast<LONGLONG>(cpuNow)
+                        ? (qpcNow.QuadPart - static_cast<LONGLONG>(cpuNow)) * 1'000'000.0 / qpcFrequency.QuadPart
+                        : 0.0;
+
+                const auto agoUs =
+                    static_cast<uint64_t>((gpuNow - ticks) * 1'000'000.0 / frequency + sinceCalibrationUs);
+
+                if (agoUs < nowUs)
+                    endUs = nowUs - agoUs;
+            }
+        }
+
+        slotRead[slot] = true;
+        return endUs;
+    }
+};
+} // namespace
+
+void InputCommon::track_present_gpu_end(uint64_t simStartUs, std::function<bool()> waitGpuEnd)
+{
+    QueuePresentedFrame(simStartUs,
+                        [wait = std::move(waitGpuEnd)]() -> std::optional<uint64_t>
+                        {
+                            if (!wait())
+                                return std::nullopt;
+
+                            return NowUs();
+                        });
+}
+
 void InputCommon::track_present_gpu_end(ID3D12CommandQueue* queue)
 {
     // Every present takes its simulation start, the frame generation's are counted
@@ -1457,47 +1686,49 @@ void InputCommon::track_present_gpu_end(ID3D12CommandQueue* queue)
     if (!simStartUs.has_value() || !pcl_tracking())
         return;
 
-    ID3D12Device* device = nullptr;
-    if (queue->GetDevice(IID_PPV_ARGS(&device)) != S_OK)
-        return;
+    // Timestamps on the present's queue, new ones when it changes (another swapchain or device)
+    // Never freed, at the process' exit D3D12 may already be gone
+    static std::mutex timestampsMutex;
+    static auto& timestamps = *new std::shared_ptr<GpuTimestamps>();
+    static ID3D12CommandQueue* failedQueue = nullptr;
 
-    // A fence on the queue's device, a new one when the game creates another device
-    static std::mutex fenceMutex;
-    static ID3D12Fence* fence = nullptr;
-    static uint64_t fenceValue = 0;
+    std::unique_lock lock(timestampsMutex);
 
-    std::unique_lock lock(fenceMutex);
-
-    ID3D12Device* fenceDevice = nullptr;
-    if (fence != nullptr)
-        fence->GetDevice(IID_PPV_ARGS(&fenceDevice));
-
-    if (fenceDevice != device)
+    if ((timestamps == nullptr || timestamps->queue != queue) && failedQueue != queue)
     {
-        if (fence != nullptr)
-            fence->Release();
+        timestamps = nullptr;
 
-        fence = nullptr;
-        fenceValue = 0;
+        ID3D12Device* device = nullptr;
+        if (queue->GetDevice(IID_PPV_ARGS(&device)) != S_OK)
+            return;
 
-        if (device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)) != S_OK)
-            fence = nullptr;
+        auto created = std::make_shared<GpuTimestamps>();
+
+        if (created->Init(queue, device))
+        {
+            timestamps = std::move(created);
+        }
+        else
+        {
+            LOG_WARN("No GPU timestamps on the present's queue, PC latency skipped");
+            failedQueue = queue;
+        }
+
+        device->Release();
     }
 
-    if (fenceDevice != nullptr)
-        fenceDevice->Release();
-
-    device->Release();
-
-    if (fence == nullptr || queue->Signal(fence, fenceValue + 1) != S_OK)
+    if (timestamps == nullptr || timestamps->queue != queue)
         return;
 
-    const uint64_t value = ++fenceValue;
-    auto sharedFence = SharedFence(fence);
+    const auto written = timestamps->Write();
+    if (!written.has_value())
+        return;
+
+    auto shared = timestamps;
     lock.unlock();
 
-    track_present_gpu_end(simStartUs.value(),
-                          [sharedFence, value]() { return WaitForFence(sharedFence.get(), value); });
+    QueuePresentedFrame(simStartUs.value(), [shared, slot = written->first, value = written->second]()
+                        { return shared->Read(slot, value); });
 }
 
 void InputCommon::track_present_gpu_end(ID3D11Device* device)
@@ -1659,9 +1890,11 @@ std::optional<double> InputCommon::get_pc_latency_ms(PcLatencySource& source, do
         }
     }
 
-    // The fence after the presents measures the frame that's shown, with frame generation its first present for render
-    // latency and its real frame after the generated ones for displayEndMs. The driver's reports end at the game's own
-    // GPU work.
+    // The GPU end of the presents measures the frames that are shown, with frame generation a game frame's first
+    // present for render latency and every present for displayEndMs. The driver's reports end at the game's own GPU
+    // work.
+    uint32_t displayCount = 0;
+
     {
         std::lock_guard lock(pclMutex);
 
@@ -1671,12 +1904,13 @@ std::optional<double> InputCommon::get_pc_latency_ms(PcLatencySource& source, do
             totalDisplayUs = 0;
 
             for (size_t i = 0; i < pclLatencyCount; i++)
-            {
                 totalUs += pclLatencies[i];
-                totalDisplayUs += pclDisplayLatencies[i];
-            }
+
+            for (size_t i = 0; i < pclPresentCount; i++)
+                totalDisplayUs += pclPresentLatencies[i];
 
             count = static_cast<uint32_t>(pclLatencyCount);
+            displayCount = static_cast<uint32_t>(pclPresentCount);
             source = PcLatencySource::GpuFence;
         }
     }
@@ -1697,8 +1931,9 @@ std::optional<double> InputCommon::get_pc_latency_ms(PcLatencySource& source, do
     if (count == 0)
         return std::nullopt;
 
+    // The reports have one end for both
     if (displayEndMs != nullptr)
-        *displayEndMs = static_cast<double>(totalDisplayUs) / count / 1000.0;
+        *displayEndMs = static_cast<double>(totalDisplayUs) / (displayCount != 0 ? displayCount : count) / 1000.0;
 
     return static_cast<double>(totalUs) / count / 1000.0;
 }
