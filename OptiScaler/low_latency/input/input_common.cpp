@@ -18,6 +18,11 @@
 #include <nvapi/fakenvapi.h>
 
 #include <deque>
+#include <condition_variable>
+#include <thread>
+#include <functional>
+#include <random>
+#include <d3d11_4.h>
 
 std::atomic<std::shared_ptr<LowLatencyTech>> InputCommon::currently_active_tech;
 std::atomic<std::shared_ptr<LowLatencyTech>> InputCommon::xefg_xell;
@@ -626,7 +631,11 @@ InputResult InputCommon::sleep(const InputContext& inputContext, IUnknown* pDevi
     {
         const auto start = std::chrono::steady_clock::now();
         current_tech->sleep(frame_id);
-        last_sleep_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        const auto slept = std::chrono::steady_clock::now() - start;
+        last_sleep_ms = std::chrono::duration<double, std::milli>(slept).count();
+
+        overlay_sleep_us += std::chrono::duration_cast<std::chrono::microseconds>(slept).count();
+        overlay_sleeps++;
     }
     else
     {
@@ -644,6 +653,10 @@ InputResult InputCommon::set_marker(const InputContext& inputContext, IUnknown* 
 
     if (inputContext.caller != activeInput)
         return InputResult::UsingDifferentInput;
+
+    // The game tags a frame with the overlay's ping, also when the output doesn't take the marker
+    if (marker_params.marker_type == MarkerType::PC_LATENCY_PING && !inputContext.localContext)
+        note_latency_ping(marker_params.frame_id);
 
     if (!marker_supported(inputContext.markerMode, marker_params.marker_type))
         return InputResult::InputNotSupported;
@@ -665,10 +678,17 @@ InputResult InputCommon::set_marker(const InputContext& inputContext, IUnknown* 
     // Without frame ids there's nothing to report, the overlay's timings need them
     if (!inputContext.noFrameId)
     {
-        if (marker_params.marker_type == MarkerType::SIMULATION_START)
-            State::Instance().reflexFrameId = marker_params.frame_id;
-
         add_marker_to_report(marker_params);
+
+        if (marker_params.marker_type == MarkerType::SIMULATION_START)
+        {
+            State::Instance().reflexFrameId = marker_params.frame_id;
+            note_ping_sim_start(marker_params.frame_id);
+        }
+    }
+    else if (marker_params.marker_type == MarkerType::SIMULATION_START)
+    {
+        note_sim_start_without_id();
     }
 
     if (!toOutput)
@@ -1057,6 +1077,632 @@ bool InputCommon::get_timing_data(TimingData& timingDataOut)
     return false;
 }
 
+// GPU end of the presented frames, waited on by a worker thread for the overlay's PC latency
+namespace
+{
+struct PresentedFrame
+{
+    uint64_t simStartUs;
+    std::function<bool()> waitGpuEnd; // Blocks until the frame's GPU work is done, false on a timeout or failure
+};
+
+std::mutex pclMutex;
+std::condition_variable pclCv;
+std::deque<PresentedFrame> pclPending;
+bool pclWorkerRunning = false;
+std::atomic_uint64_t pclRequestedUs = 0;
+
+// Simulation starts of inputs without frame ids (AntiLag 2, LatencyFlex), paired with the presents in order
+std::deque<uint64_t> pclSimStarts;
+
+// OptiScaler's frame generation presents a game frame after the game's present, as its generated frames and then
+// itself, while the game already presents the next one. The game frames waiting and the one being presented.
+struct FgGameFrame
+{
+    uint64_t simStartUs = 0;
+    uint32_t presents = 0;
+    uint32_t presented = 0;
+};
+
+std::deque<FgGameFrame> fgGameFrames;
+FgGameFrame fgPresentingFrame;
+std::atomic_uint64_t fgGamePresentUs = 0;
+
+// Simulation start to GPU end of the last measured frames, in us: first present (render) and last present (display)
+std::array<uint32_t, 64> pclLatencies {};
+std::array<uint32_t, 64> pclDisplayLatencies {};
+size_t pclLatencyCount = 0;
+size_t pclLatencyHead = 0;
+uint64_t pclLastMeasuredUs = 0;
+
+// Frames are only tracked while the overlay asks for the latency
+constexpr uint64_t pclIdleUs = 2'000'000;
+constexpr size_t pclMaxPending = 8;
+constexpr uint64_t pclMaxLatencyUs = 1'000'000;
+
+uint64_t NowUs() { return Util::GetTimestamp() / 1000; }
+
+struct ThreadEvent
+{
+    HANDLE handle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    ~ThreadEvent()
+    {
+        if (handle != nullptr)
+            CloseHandle(handle);
+    }
+};
+
+// D3D12 and D3D11 fences share these calls
+template <typename TFence> bool WaitForFence(TFence* fence, uint64_t value)
+{
+    thread_local ThreadEvent event;
+
+    bool done = fence->GetCompletedValue() >= value;
+
+    if (!done && event.handle != nullptr && fence->SetEventOnCompletion(value, event.handle) == S_OK)
+        done = WaitForSingleObject(event.handle, 500) == WAIT_OBJECT_0;
+
+    // UINT64_MAX after a device removal
+    return done && fence->GetCompletedValue() != UINT64_MAX;
+}
+
+template <typename TFence> std::shared_ptr<TFence> SharedFence(TFence* fence)
+{
+    fence->AddRef();
+    return std::shared_ptr<TFence>(fence, [](TFence* f) { f->Release(); });
+}
+
+void PclWorker()
+{
+    std::unique_lock lock(pclMutex);
+
+    while (true)
+    {
+        if (!pclCv.wait_for(lock, std::chrono::seconds(1), [] { return !pclPending.empty(); }))
+        {
+            if (NowUs() - pclRequestedUs > pclIdleUs)
+                break;
+
+            continue;
+        }
+
+        auto frame = std::move(pclPending.front());
+        pclPending.pop_front();
+        lock.unlock();
+
+        const bool done = frame.waitGpuEnd();
+        const auto endUs = NowUs();
+        frame.waitGpuEnd = nullptr;
+
+        lock.lock();
+
+        if (!done || endUs <= frame.simStartUs || endUs - frame.simStartUs >= pclMaxLatencyUs)
+            continue;
+
+        // A game frame's presents end in order: with frame generation its first present ends right after the game's
+        // base render and frame generation pass finish on the GPU, while its last present is the real frame shown
+        static uint64_t frameSimStartUs = 0;
+        static size_t frameSlot = 0;
+        const uint32_t elapsedUs = static_cast<uint32_t>(endUs - frame.simStartUs);
+
+        if (frame.simStartUs == frameSimStartUs && pclLatencyCount > 0)
+        {
+            pclDisplayLatencies[frameSlot] = std::max(pclDisplayLatencies[frameSlot], elapsedUs);
+            pclLastMeasuredUs = endUs;
+            continue;
+        }
+
+        frameSimStartUs = frame.simStartUs;
+        frameSlot = pclLatencyHead;
+
+        pclLatencies[pclLatencyHead] = elapsedUs;
+        pclDisplayLatencies[pclLatencyHead] = elapsedUs;
+        pclLatencyHead = (pclLatencyHead + 1) % pclLatencies.size();
+        pclLatencyCount = std::min(pclLatencyCount + 1, pclLatencies.size());
+        pclLastMeasuredUs = endUs;
+    }
+
+    pclWorkerRunning = false;
+}
+} // namespace
+
+bool InputCommon::pcl_requested() { return NowUs() - pclRequestedUs <= pclIdleUs; }
+
+bool InputCommon::pcl_tracking()
+{
+    if (!pcl_requested())
+        return false;
+
+    // The worker falls behind only if the GPU stalls, skip frames rather than queue them
+    std::lock_guard lock(pclMutex);
+    return pclPending.size() < pclMaxPending;
+}
+
+void InputCommon::note_sim_start_without_id()
+{
+    if (!pcl_tracking())
+        return;
+
+    const auto nowUs = NowUs();
+    std::lock_guard lock(pclMutex);
+
+    // Older ones lost their present
+    while (!pclSimStarts.empty() && (nowUs - pclSimStarts.front() > pclMaxLatencyUs || pclSimStarts.size() >= 8))
+        pclSimStarts.pop_front();
+
+    pclSimStarts.push_back(nowUs);
+}
+
+std::optional<uint64_t> InputCommon::game_present_sim_start()
+{
+    // The frame the game presents, by its id
+    const uint64_t frameId = last_present_start_frame_id;
+    const auto& report = frame_reports[frameId % FRAME_REPORTS_BUFFER_SIZE];
+
+    if (frameId != 0 && report.frameID == frameId && report.simStartTime != 0)
+        return report.simStartTime;
+
+    // Without ids the oldest simulation start belongs to this present
+    std::lock_guard lock(pclMutex);
+
+    if (pclSimStarts.empty())
+        return std::nullopt;
+
+    auto simStartUs = pclSimStarts.front();
+    pclSimStarts.pop_front();
+
+    return simStartUs;
+}
+
+// The overlay's pings, as PC Latency Stats sends them for FrameView: a message the game marks the next frame with
+namespace
+{
+std::mutex pingMutex;
+uint64_t pingSentUs = 0;      // Sent and not marked yet
+uint64_t pingFrameId = 0;     // Marked, waiting for the frame's simulation start
+uint64_t pingFrameSentUs = 0; //
+double pingEmaMs = 0.0;
+uint64_t pingLastSampleUs = 0;
+uint32_t pingSamples = 0;
+std::atomic_bool pingThreadRunning = false;
+
+void AddPingSample(uint64_t sentUs, uint64_t simStartUs)
+{
+    const double ms = (simStartUs - sentUs) / 1000.0;
+
+    // PresentMon's average of the input to frame start
+    pingEmaMs = pingSamples == 0 || simStartUs - pingLastSampleUs > 3'000'000 ? ms : pingEmaMs + 0.1 * (ms - pingEmaMs);
+    pingLastSampleUs = simStartUs;
+    pingSamples++;
+}
+
+void PingThread()
+{
+    const UINT pingMessage = RegisterWindowMessageW(L"PC_Latency_Stats_Ping");
+    std::minstd_rand random(GetCurrentThreadId());
+    std::uniform_int_distribution<DWORD> interval(100, 300);
+
+    while (pingMessage != 0 && InputCommon::pcl_requested())
+    {
+        Sleep(interval(random));
+
+        // Only the game's window when it's in the foreground
+        HWND hwnd = GetForegroundWindow();
+        DWORD processId = 0;
+
+        if (hwnd == nullptr || GetWindowThreadProcessId(hwnd, &processId) == 0 || processId != GetCurrentProcessId())
+            continue;
+
+        {
+            std::lock_guard lock(pingMutex);
+            pingSentUs = NowUs();
+        }
+
+        PostMessageW(hwnd, pingMessage, 0, 0);
+    }
+
+    pingThreadRunning = false;
+}
+} // namespace
+
+void InputCommon::note_latency_ping(uint64_t frameId)
+{
+    std::lock_guard lock(pingMutex);
+
+    // The game's own pings (when FrameView runs) have no send time here
+    const auto sentUs = pingSentUs;
+    if (sentUs == 0 || NowUs() - sentUs > 1'000'000)
+        return;
+
+    pingSentUs = 0;
+
+    const auto& report = frame_reports[frameId % FRAME_REPORTS_BUFFER_SIZE];
+
+    // Usually the frame starts after the ping, else it's the next frame's start
+    if (report.frameID == frameId && report.simStartTime >= sentUs)
+    {
+        AddPingSample(sentUs, report.simStartTime);
+        pingFrameId = 0;
+        return;
+    }
+
+    pingFrameId = frameId;
+    pingFrameSentUs = sentUs;
+}
+
+void InputCommon::note_ping_sim_start(uint64_t frameId)
+{
+    std::lock_guard lock(pingMutex);
+
+    if (pingFrameId == 0 || frameId < pingFrameId)
+        return;
+
+    const auto& report = frame_reports[frameId % FRAME_REPORTS_BUFFER_SIZE];
+
+    if (report.frameID != frameId || report.simStartTime < pingFrameSentUs)
+        return;
+
+    if (report.simStartTime - pingFrameSentUs < 1'000'000)
+        AddPingSample(pingFrameSentUs, report.simStartTime);
+
+    pingFrameId = 0;
+}
+
+std::optional<double> InputCommon::get_input_wait_ms(uint32_t* pings)
+{
+    if (!pingThreadRunning.exchange(true))
+        std::thread(PingThread).detach();
+
+    std::lock_guard lock(pingMutex);
+
+    if (pings != nullptr)
+        *pings = pingSamples;
+
+    if (pingSamples == 0 || NowUs() - pingLastSampleUs > 3'000'000)
+        return std::nullopt;
+
+    return pingEmaMs;
+}
+
+void InputCommon::note_fg_game_present(uint32_t frameMultiplier)
+{
+    if (!pcl_requested())
+        return;
+
+    const auto simStartUs = game_present_sim_start();
+
+    std::lock_guard lock(pclMutex);
+    fgGamePresentUs = NowUs();
+
+    // A few wait at most, more and the frame generation didn't present some
+    while (fgGameFrames.size() >= 3)
+        fgGameFrames.pop_front();
+
+    fgGameFrames.push_back({ simStartUs.value_or(0), std::max(frameMultiplier, 1u), 0 });
+}
+
+void InputCommon::fg_game_presents(uint32_t presents)
+{
+    if (!pcl_requested())
+        return;
+
+    std::lock_guard lock(pclMutex);
+
+    if (presents == 0)
+    {
+        if (!fgGameFrames.empty())
+            fgGameFrames.pop_back();
+        else
+            fgPresentingFrame.presented = fgPresentingFrame.presents;
+
+        return;
+    }
+
+    // The frame it was given last, it may already be the one presenting
+    if (!fgGameFrames.empty())
+        fgGameFrames.back().presents = presents;
+    else
+        fgPresentingFrame.presents = presents;
+}
+
+std::optional<uint64_t> InputCommon::take_present_sim_start()
+{
+    // Without OptiScaler's frame generation swapchain the game presents here itself
+    if (NowUs() - fgGamePresentUs > 500'000)
+        return game_present_sim_start();
+
+    std::lock_guard lock(pclMutex);
+
+    // The next game frame once this one has all its presents, catching up when more wait than usual
+    if (fgPresentingFrame.presented >= fgPresentingFrame.presents && !fgGameFrames.empty())
+    {
+        while (fgGameFrames.size() > 1)
+            fgGameFrames.pop_front();
+
+        fgPresentingFrame = fgGameFrames.front();
+        fgGameFrames.pop_front();
+    }
+
+    fgPresentingFrame.presented++;
+
+    if (fgPresentingFrame.simStartUs == 0)
+        return std::nullopt;
+
+    return fgPresentingFrame.simStartUs;
+}
+
+void InputCommon::track_present_gpu_end(uint64_t simStartUs, std::function<bool()> waitGpuEnd)
+{
+    std::lock_guard lock(pclMutex);
+
+    // Every wait is queued, the callers checked pcl_tracking() for room before signaling
+    pclPending.push_back({ simStartUs, std::move(waitGpuEnd) });
+
+    if (!pclWorkerRunning)
+    {
+        pclWorkerRunning = true;
+        std::thread(PclWorker).detach();
+    }
+
+    pclCv.notify_one();
+}
+
+void InputCommon::track_present_gpu_end(ID3D12CommandQueue* queue)
+{
+    // Every present takes its simulation start, the frame generation's are counted
+    if (queue == nullptr || !pcl_requested())
+        return;
+
+    auto simStartUs = take_present_sim_start();
+    if (!simStartUs.has_value() || !pcl_tracking())
+        return;
+
+    ID3D12Device* device = nullptr;
+    if (queue->GetDevice(IID_PPV_ARGS(&device)) != S_OK)
+        return;
+
+    // A fence on the queue's device, a new one when the game creates another device
+    static std::mutex fenceMutex;
+    static ID3D12Fence* fence = nullptr;
+    static uint64_t fenceValue = 0;
+
+    std::unique_lock lock(fenceMutex);
+
+    ID3D12Device* fenceDevice = nullptr;
+    if (fence != nullptr)
+        fence->GetDevice(IID_PPV_ARGS(&fenceDevice));
+
+    if (fenceDevice != device)
+    {
+        if (fence != nullptr)
+            fence->Release();
+
+        fence = nullptr;
+        fenceValue = 0;
+
+        if (device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)) != S_OK)
+            fence = nullptr;
+    }
+
+    if (fenceDevice != nullptr)
+        fenceDevice->Release();
+
+    device->Release();
+
+    if (fence == nullptr || queue->Signal(fence, fenceValue + 1) != S_OK)
+        return;
+
+    const uint64_t value = ++fenceValue;
+    auto sharedFence = SharedFence(fence);
+    lock.unlock();
+
+    track_present_gpu_end(simStartUs.value(),
+                          [sharedFence, value]() { return WaitForFence(sharedFence.get(), value); });
+}
+
+void InputCommon::track_present_gpu_end(ID3D11Device* device)
+{
+    // Every present takes its simulation start, the frame generation's are counted
+    if (device == nullptr || !pcl_requested())
+        return;
+
+    auto simStartUs = take_present_sim_start();
+    if (!simStartUs.has_value() || !pcl_tracking())
+        return;
+
+    // ID3D11Fence needs Windows 10 1703, the game's present submits the signal
+    static std::mutex fenceMutex;
+    static ID3D11Fence* fence = nullptr;
+    static uint64_t fenceValue = 0;
+
+    std::unique_lock lock(fenceMutex);
+
+    ID3D11Device* fenceDevice = nullptr;
+    if (fence != nullptr)
+        fence->GetDevice(&fenceDevice);
+
+    if (fenceDevice != device)
+    {
+        if (fence != nullptr)
+            fence->Release();
+
+        fence = nullptr;
+        fenceValue = 0;
+
+        ID3D11Device5* device5 = nullptr;
+        if (device->QueryInterface(IID_PPV_ARGS(&device5)) == S_OK)
+        {
+            if (device5->CreateFence(0, D3D11_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)) != S_OK)
+                fence = nullptr;
+
+            device5->Release();
+        }
+    }
+
+    if (fenceDevice != nullptr)
+        fenceDevice->Release();
+
+    if (fence == nullptr)
+        return;
+
+    ID3D11DeviceContext* context = nullptr;
+    device->GetImmediateContext(&context);
+
+    ID3D11DeviceContext4* context4 = nullptr;
+    bool signaled = false;
+
+    if (context != nullptr && context->QueryInterface(IID_PPV_ARGS(&context4)) == S_OK)
+    {
+        signaled = context4->Signal(fence, fenceValue + 1) == S_OK;
+        context4->Release();
+    }
+
+    if (context != nullptr)
+        context->Release();
+
+    if (!signaled)
+        return;
+
+    const uint64_t value = ++fenceValue;
+    auto sharedFence = SharedFence(fence);
+    lock.unlock();
+
+    track_present_gpu_end(simStartUs.value(),
+                          [sharedFence, value]() { return WaitForFence(sharedFence.get(), value); });
+}
+
+void InputCommon::note_game_present_ms(double ms, bool frameGenSwapchain)
+{
+    // With a frame generation swapchain the real swapchain's presents are the generated and real frames
+    static std::atomic_uint64_t lastFrameGenUs = 0;
+    const auto nowUs = NowUs();
+
+    if (frameGenSwapchain)
+        lastFrameGenUs = nowUs;
+    else if (nowUs - lastFrameGenUs < 500'000)
+        return;
+
+    overlay_present_us += static_cast<uint64_t>(std::max(ms, 0.0) * 1000.0);
+    overlay_presents++;
+}
+
+std::optional<double> InputCommon::take_overlay_wait_ms()
+{
+    const auto sleepUs = overlay_sleep_us.exchange(0);
+    const auto sleeps = overlay_sleeps.exchange(0);
+    const auto presentUs = overlay_present_us.exchange(0);
+    const auto presents = overlay_presents.exchange(0);
+
+    if (presents == 0)
+        return std::nullopt;
+
+    double waitMs = static_cast<double>(presentUs) / presents / 1000.0;
+
+    if (sleeps != 0 && activeOutput != LowLatencyMode::None)
+        waitMs += static_cast<double>(sleepUs) / sleeps / 1000.0;
+
+    return waitMs;
+}
+
+std::optional<double> InputCommon::get_pc_latency_ms(PcLatencySource& source, double* displayEndMs)
+{
+    pclRequestedUs = NowUs();
+
+    uint64_t totalUs = 0;
+    uint64_t totalDisplayUs = 0;
+    uint32_t count = 0;
+
+    auto addFrame = [&](uint64_t startUs, uint64_t endUs)
+    {
+        // Unfinished frames and leftovers of a previous run
+        if (startUs == 0 || endUs <= startUs || endUs - startUs > 1'000'000)
+            return;
+
+        totalUs += endUs - startUs;
+        totalDisplayUs += endUs - startUs;
+        count++;
+    };
+
+    source = PcLatencySource::None;
+
+    if (activeOutput == LowLatencyMode::Reflex)
+    {
+        auto tech = currently_active_tech.load();
+
+        if (auto reflex_tech = std::dynamic_pointer_cast<Reflex>(tech))
+        {
+            static NV_LATENCY_RESULT_PARAMS results {};
+            results.version = NV_LATENCY_RESULT_PARAMS_VER1;
+
+            if (reflex_tech->get_latency(&results) == NVAPI_OK)
+            {
+                for (const auto& report : results.frameReport)
+                    addFrame(report.simStartTime, report.gpuRenderEndTime);
+            }
+        }
+        else if (auto reflex_vk = std::dynamic_pointer_cast<ReflexVk>(tech))
+        {
+            static std::array<VkLatencyTimingsFrameReportNV, NVAPI_BUFFER_SIZE> timings {};
+
+            for (auto& timing : timings)
+                timing = { VK_STRUCTURE_TYPE_LATENCY_TIMINGS_FRAME_REPORT_NV };
+
+            VkGetLatencyMarkerInfoNV info { VK_STRUCTURE_TYPE_GET_LATENCY_MARKER_INFO_NV };
+            info.timingCount = static_cast<uint32_t>(timings.size());
+            info.pTimings = timings.data();
+
+            if (reflex_vk->get_latency(&info) == VK_SUCCESS)
+            {
+                for (uint32_t i = 0; i < std::min(info.timingCount, static_cast<uint32_t>(timings.size())); i++)
+                    addFrame(timings[i].simStartTimeUs, timings[i].gpuRenderEndTimeUs);
+            }
+        }
+    }
+
+    // The fence after the presents measures the frame that's shown, with frame generation its first present for render
+    // latency and its real frame after the generated ones for displayEndMs. The driver's reports end at the game's own
+    // GPU work.
+    {
+        std::lock_guard lock(pclMutex);
+
+        if (pclLatencyCount != 0 && NowUs() - pclLastMeasuredUs < 1'000'000)
+        {
+            totalUs = 0;
+            totalDisplayUs = 0;
+
+            for (size_t i = 0; i < pclLatencyCount; i++)
+            {
+                totalUs += pclLatencies[i];
+                totalDisplayUs += pclDisplayLatencies[i];
+            }
+
+            count = static_cast<uint32_t>(pclLatencyCount);
+            source = PcLatencySource::GpuFence;
+        }
+    }
+
+    if (count != 0 && source == PcLatencySource::None)
+        source = PcLatencySource::Driver;
+
+    // Without either only the CPU side markers are real, up to the present's end
+    if (count == 0)
+    {
+        for (const auto& report : frame_reports)
+            addFrame(report.simStartTime, report.presentEndTime);
+
+        if (count != 0)
+            source = PcLatencySource::Estimated;
+    }
+
+    if (count == 0)
+        return std::nullopt;
+
+    if (displayEndMs != nullptr)
+        *displayEndMs = static_cast<double>(totalDisplayUs) / count / 1000.0;
+
+    return static_cast<double>(totalUs) / count / 1000.0;
+}
+
 // As DLSSG: async present markers on the game's queue around the game's present, with the frame multiplier for
 // Reflex Sync in between. Every marker uses the game's frame id.
 void InputCommon::fg_game_present(ID3D12CommandQueue* gameQueue, bool presented, uint32_t frameMultiplier)
@@ -1253,10 +1899,10 @@ void InputCommon::xefg_marker(void* xellContext, uint32_t frame_id, uint32_t mar
 
     LOG_TRACE_LOWLATENCY("XeFG {}: {}", magic_enum::enum_name(type), frame_id);
 
-    // Only XeFG's own context next to a Reflex or AntiLag 2 output, the XeLL output's context has them already
     auto own = xefg_xell.load();
+    const bool isOwnContext = own != nullptr && own->get_tech_context() == xellContext;
 
-    if (own == nullptr || own->get_tech_context() != xellContext)
+    if (!isOwnContext && xellContext != xell_output_context())
         return;
 
     // Without generated frames XeFG sends both right away, DLSSG doesn't send them
@@ -1272,14 +1918,21 @@ void InputCommon::xefg_marker(void* xellContext, uint32_t frame_id, uint32_t mar
     {
         xefg_frame_id = frame_id;
 
-        std::scoped_lock lock(xefg_batch_mutex);
+        if (isOwnContext)
+        {
+            std::scoped_lock lock(xefg_batch_mutex);
 
-        // Nothing takes them while XeFG's presents don't reach the wrapped swapchain, only the latest few are kept
-        if (xefg_batches.size() >= xefg_max_batches)
-            xefg_batches.pop_front();
+            // Nothing takes them while XeFG's presents don't reach the wrapped swapchain, only the latest few are kept
+            if (xefg_batches.size() >= xefg_max_batches)
+                xefg_batches.pop_front();
 
-        xefg_batches.push_back({ frame_id, fg->GetInterpolatedFrameCount() + 1 });
+            xefg_batches.push_back({ frame_id, fg->GetInterpolatedFrameCount() + 1 });
+        }
     }
+
+    // Only XeFG's own context next to a Reflex or AntiLag 2 output, the XeLL output's context has them already
+    if (!isOwnContext)
+        return;
 
     // Known after XeFG's first present
     auto queue = xefg_present_queue.load();
