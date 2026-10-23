@@ -2950,7 +2950,7 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                     latency = InputCommon::get_pc_latency_ms(source, &displayEndMs);
 
                     // FrameView's PC Latency: the input's wait for the simulation start, timed with pings as PC
-                    // Latency Stats does (else half a real frame), plus the simulation start to the real frame shown
+                    // Latency Stats does (else half a real frame), plus the simulation start to every frame shown
                     const double realFrameMs = averageFrameTime * (generatedFrames + 1.0);
                     uint32_t pings = 0;
                     const auto measuredInputWaitMs = InputCommon::get_input_wait_ms(&pings);
@@ -3135,7 +3135,7 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
             // The display's refresh rate, with VRR the frames it shows per second
             if (overlayType >= FpsOverlay_Simple && config->FpsOverlayShowRefreshRate.value_or_default())
             {
-                constexpr auto delayBetweenPollsMs = 500;
+                constexpr auto delayBetweenPollsMs = 250;
                 static auto previousPoll = 0.0;
                 static std::optional<OverlayTelemetry::RefreshRate> refresh;
 
@@ -8361,6 +8361,70 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
             ImGui::PopStyleColor();
         };
 
+        // Ready made looks, as the text of a settings code: what a preset doesn't list goes back to the default
+        if (ImGui::TreeNode("Presets"))
+        {
+            struct OverlayPreset
+            {
+                const char* name;
+                const char* tip;
+                const char* settings;
+            };
+
+            static const OverlayPreset presets[] = {
+                { "Opti-Like",
+                  "OptiScaler's overlay, refined: Segoe UI Semibold on a soft rounded panel with a shadow.\n"
+                  "FPS with lows, frame time graph, upscaler and ratio, PC latency and the bottleneck.",
+                  "OverlaysUseTheme=false\nType=3\nShowLows=true\nShowRatio=true\nShowLatency=true\n"
+                  "ShowBottleneck=true\nShowUpscalerTime=true\n"
+                  "RowOrder=fps,frametime,upscale,upscaler,latency,bottleneck\n"
+                  "Font=seguisb.ttf\nAlpha=0.55\nRounding=6\nLabelColor=0xC8C8C8\nValueColor=0xFFFFFF\n"
+                  "GraphColor=0x3CD070\nShadow=1\nShadowStrength=0.6\n" },
+                { "Afterburner-Like",
+                  "As MSI Afterburner's on-screen display: Unispace Bold (RTSS' font, when it's installed), orange "
+                  "labels and white values, outlined with no background.\n"
+                  "GPU, VRAM, CPU and RAM first, then FPS with lows and the frame time graph, compact labels.",
+                  "OverlaysUseTheme=false\nType=3\nShowLows=true\nShowGpu=true\nShowVram=true\nShowCpu=true\n"
+                  "ShowRam=true\nCompactLabels=true\nRowOrder=gpu,vram,cpu,ram,fps,frametime\n"
+                  "Font=unispace bd.ttf\nAlpha=0\nRounding=0\nLabelColor=0xFF9C00\nValueColor=0xFFFFFF\n"
+                  "GraphColor=0xFF9C00\nShadow=2\nShadowStrength=1\nShadowColor=0x000000\n" },
+                { "Latency Lab",
+                  "A strip at the top center for latency tuning: Bahnschrift, cyan values on a dark glass panel.\n"
+                  "FPS with 1% and 0.1% lows, PC and render latency, frame time, refresh rate and the bottleneck.",
+                  "OverlaysUseTheme=false\nPos=4\nHorizontal=true\nType=2\nShowLows=true\nShowPointOneLow=true\n"
+                  "ShowLatency=true\nLatencyType=2\nShowRefreshRate=true\nShowBottleneck=true\nCompactLabels=true\n"
+                  "RowOrder=fps,latency,frametime,refresh,bottleneck\nFont=bahnschrift.ttf\nAlpha=0.35\n"
+                  "BGColor=0x0A0F14\nRounding=10\nLabelColor=0x8A9BA8\nValueColor=0x00E5FF\nGraphColor=0x00E5FF\n"
+                  "LabelScale=0.85\nValueScale=1.1\nLetterSpacing=0.5\nShadow=1\nShadowStrength=0.5\n" },
+            };
+
+            static std::string presetStatus;
+            const float presetCount = static_cast<float>(std::size(presets));
+            const float buttonWidth =
+                (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * (presetCount - 1.0f)) /
+                presetCount;
+
+            for (size_t i = 0; i < std::size(presets); i++)
+            {
+                if (i > 0)
+                    ImGui::SameLine();
+
+                if (ImGui::Button(presets[i].name, ImVec2(buttonWidth, 0.0f)))
+                {
+                    if (config->ApplyOverlayPreset(presets[i].settings))
+                        presetStatus = StrFmt("%s applied, Save Settings to keep it", presets[i].name);
+                }
+
+                ShowTooltip(presets[i].tip);
+            }
+
+            statusText(presetStatus.empty()
+                           ? "A preset replaces the overlay's look and rows, Copy Code in Share Settings keeps yours."
+                           : presetStatus);
+
+            ImGui::TreePop();
+        }
+
         // Which rows are shown and their order, from top to bottom (left to right when horizontal)
         if (ImGui::TreeNode("Rows"))
         {
@@ -8450,9 +8514,11 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                                        "Render Latency: from the simulation start to the end of the GPU base render "
                                        "and frame generation pass (D3D12, D3D11, Vulkan). Estimated (est.) without "
                                        "GPU time.\n"
-                                       "PC Latency: from the input to the end of the GPU work of the real frame "
-                                       "shown, as FrameView measures it (simulation start to displayed real frame GPU "
-                                       "end plus the input's wait for the simulation start).\n"
+                                       "PC Latency: an estimate close to FrameView and PresentMon. The input's wait "
+                                       "for the simulation start, timed with pings as PC Latency Stats does, plus the "
+                                       "simulation start to the end of every frame shown, generated frames included. "
+                                       "The end is the GPU's own timestamp on D3D12, else when its work is done, not "
+                                       "the display's flip FrameView reads, so a few ms of difference are expected.\n"
                                        "Neither includes the mouse or the display, which tools like FLM measure.");
                         break;
 
@@ -8595,7 +8661,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                 config->FpsOverlayLatencyType = (FpsOverlayLatency) latencyType;
 
             ShowTooltip("What the PC Latency row shows.\n"
-                        "PC Latency: from the input to the frame shown, as FrameView measures it.\n"
+                        "PC Latency: from the input to the frames shown, an estimate close to FrameView's.\n"
                         "Render Latency: from the simulation start to the end of the shown frame's GPU work.");
 
             ImGui::TreePop();

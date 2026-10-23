@@ -1527,7 +1527,7 @@ inline void ThreadMain()
 
 struct RefreshRate
 {
-    double currentHz = 0.0; // Last half second
+    double currentHz = 0.0; // Last quarter second
     double averageHz = 0.0; // Last 1000 refreshes
 };
 
@@ -1562,14 +1562,14 @@ inline std::optional<RefreshRate> QueryRefreshRate(HWND window)
     if (newestTime > ctx.times[oldest])
         out.averageHz = (ctx.count - 1) * static_cast<double>(frequency.QuadPart) / (newestTime - ctx.times[oldest]);
 
-    // The refreshes of the last half second
+    // The refreshes of the last quarter second
     size_t recent = 1;
     int64_t recentStart = newestTime;
 
     for (size_t i = 1; i < ctx.count; i++)
     {
         const int64_t time = ctx.times[(newest + detail::VBlank::kHistory - i) % detail::VBlank::kHistory];
-        if (newestTime - time > frequency.QuadPart / 2)
+        if (newestTime - time > frequency.QuadPart / 4)
             break;
 
         recent++;
