@@ -410,6 +410,8 @@ class Config
     // means that order
     CustomOptional<std::string, NoDefault> FpsOverlayRowOrder;
     CustomOptional<float, NoDefault> FpsOverlayRowSpacing; // No value means the default spacing
+    // Milliseconds the values that change every frame are kept, 0 updates them every frame
+    CustomOptional<float> FpsOverlayUpdateInterval { 0.0f };
     CustomOptional<float> FpsOverlayAlpha { 0.4f };
     CustomOptional<float, NoDefault> FpsScale; // No value means same as MenuScale
     CustomOptional<float> FpsOverlayGraphHeight { 1.0f };

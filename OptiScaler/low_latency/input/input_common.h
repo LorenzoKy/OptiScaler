@@ -169,10 +169,10 @@ class InputCommon
     static InputResult get_frame_reports(const InputContext& inputContext, IUnknown* pDev, FrameReport* reports);
     static bool get_timing_data(TimingData& timingDataOut);
 
-    // Average latency of the last frames in ms, simulation start to the end of the GPU work of the frame shown:
-    // measured with a fence after the presents (with frame generation the first present's for render latency and the
-    // real frame's for displayEndMs), else as the Reflex output's driver reports it, else estimated from the markers
-    // OptiScaler tracked (simulation start to present end, no GPU time). Asking starts the fence tracking.
+    // Average latency of the last half second in ms, simulation start to the end of the GPU work of the frame shown:
+    // measured after the presents (with frame generation the first present's for render latency and every present's
+    // for displayEndMs), else as the Reflex output's driver reports it, else estimated from the markers OptiScaler
+    // tracked (simulation start to present end, no GPU time). Asking starts the tracking.
     static std::optional<double> get_pc_latency_ms(PcLatencySource& source, double* displayEndMs = nullptr);
 
     // For get_pc_latency_ms, only while it's being asked for: the simulation start of the frame being presented and a
@@ -183,7 +183,8 @@ class InputCommon
 
     // FrameView's input to frame start: while the latency is asked for, OptiScaler pings the game window every 100 to
     // 300 ms as PC Latency Stats does and times it to the simulation start of the frame the game marks with
-    // PC_LATENCY_PING. The average of the pings (as PresentMon averages them), none without the game's ping markers.
+    // PC_LATENCY_PING. The average of the pings (as PresentMon averages them, it keeps the last one while no pings
+    // come back), none without the game's ping markers.
     static void note_latency_ping(uint64_t frameId);
     static std::optional<double> get_input_wait_ms(uint32_t* pings = nullptr);
     static std::optional<uint64_t> take_present_sim_start();
