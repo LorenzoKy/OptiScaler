@@ -904,6 +904,7 @@ static const char* overlayIniKeys[] = {
     "FpsOverlayCompactLabels",
     "FpsOverlayRowOrder",
     "FpsOverlayRowSpacing",
+    "FpsOverlayUpdateInterval",
     "FpsOverlayAlpha",
     "FpsScale",
     "FpsOverlayGraphHeight",
@@ -973,6 +974,7 @@ void Config::ReadOverlaySettings(bool assign)
     apply(FpsOverlayCompactLabels, readBool("Menu", "FpsOverlayCompactLabels"));
     apply(FpsOverlayRowOrder, readString("Menu", "FpsOverlayRowOrder", true));
     apply(FpsOverlayRowSpacing, readClamped("FpsOverlayRowSpacing", 0.0f, 32.0f));
+    apply(FpsOverlayUpdateInterval, readClamped("FpsOverlayUpdateInterval", 0.0f, 1000.0f));
     apply(FpsOverlayAlpha, readClamped("FpsOverlayAlpha", 0.0f, 1.0f));
     apply(FpsScale, readClamped("FpsScale", 0.5f, 3.0f));
     apply(FpsOverlayGraphHeight, readClamped("FpsOverlayGraphHeight", 0.5f, 3.0f));
@@ -1025,6 +1027,8 @@ void Config::WriteOverlaySettings()
     ini.SetValue("Menu", "FpsOverlayCompactLabels", GetBoolValue(FpsOverlayCompactLabels.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayRowOrder", FpsOverlayRowOrder.value_for_config_or("auto").c_str());
     ini.SetValue("Menu", "FpsOverlayRowSpacing", GetFloatValue(FpsOverlayRowSpacing.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayUpdateInterval",
+                 GetFloatValue(FpsOverlayUpdateInterval.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayAlpha", GetFloatValue(FpsOverlayAlpha.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsScale", GetFloatValue(FpsScale.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayGraphHeight", GetFloatValue(FpsOverlayGraphHeight.value_for_config()).c_str());

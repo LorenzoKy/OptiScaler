@@ -1108,15 +1108,57 @@ std::deque<FgGameFrame> fgGameFrames;
 FgGameFrame fgPresentingFrame;
 std::atomic_uint64_t fgGamePresentUs = 0;
 
-// Simulation start to GPU end of the last measured frames, in us: a game frame's first present (render) and every
-// present shown, generated ones too, with its game frame's simulation start (display, as PresentMon's PC latency)
-std::array<uint32_t, 64> pclLatencies {};
-size_t pclLatencyCount = 0;
-size_t pclLatencyHead = 0;
-std::array<uint32_t, 128> pclPresentLatencies {};
-size_t pclPresentCount = 0;
-size_t pclPresentHead = 0;
+// Simulation start to GPU end of the last measured frames: a game frame's first present (render) and every present
+// shown, generated ones too, with its game frame's simulation start (display, as PresentMon's PC latency)
+struct PclSample
+{
+    uint64_t endUs = 0;
+    uint32_t latencyUs = 0;
+};
+
+struct PclSamples
+{
+    std::array<PclSample, 512> samples {};
+    size_t count = 0;
+    size_t head = 0;
+
+    void Add(uint64_t endUs, uint32_t latencyUs)
+    {
+        samples[head] = { endUs, latencyUs };
+        head = (head + 1) % samples.size();
+        count = std::min(count + 1, samples.size());
+    }
+
+    // The ones that ended in the window before the newest, so the average follows the overlay's refresh
+    std::pair<uint64_t, uint32_t> Total(uint64_t windowUs) const
+    {
+        uint64_t totalUs = 0;
+        uint32_t taken = 0;
+
+        if (count == 0)
+            return { 0, 0 };
+
+        const uint64_t newestUs = samples[(head + samples.size() - 1) % samples.size()].endUs;
+
+        for (size_t i = 1; i <= count; i++)
+        {
+            const auto& sample = samples[(head + samples.size() - i) % samples.size()];
+
+            if (newestUs - sample.endUs > windowUs)
+                break;
+
+            totalUs += sample.latencyUs;
+            taken++;
+        }
+
+        return { totalUs, taken };
+    }
+};
+
+PclSamples pclLatencies;
+PclSamples pclPresentLatencies;
 uint64_t pclLastMeasuredUs = 0;
+constexpr uint64_t pclAverageUs = 500'000;
 
 // Frames are only tracked while the overlay asks for the latency
 constexpr uint64_t pclIdleUs = 2'000'000;
@@ -1193,24 +1235,18 @@ void PclWorker()
         // start as the real one after it does
         const uint32_t elapsedUs = static_cast<uint32_t>(endUs - frame.simStartUs);
 
-        pclPresentLatencies[pclPresentHead] = elapsedUs;
-        pclPresentHead = (pclPresentHead + 1) % pclPresentLatencies.size();
-        pclPresentCount = std::min(pclPresentCount + 1, pclPresentLatencies.size());
+        pclPresentLatencies.Add(endUs, elapsedUs);
         pclLastMeasuredUs = endUs;
 
         // A game frame's presents end in order: with frame generation its first present ends right after the game's
         // base render and frame generation pass finish on the GPU
         static uint64_t frameSimStartUs = 0;
 
-        if (frame.simStartUs == frameSimStartUs && pclLatencyCount > 0)
+        if (frame.simStartUs == frameSimStartUs && pclLatencies.count > 0)
             continue;
 
         frameSimStartUs = frame.simStartUs;
-
-        pclLatencies[pclLatencyHead] = elapsedUs;
-        pclLatencyHead = (pclLatencyHead + 1) % pclLatencies.size();
-        pclLatencyCount = std::min(pclLatencyCount + 1, pclLatencies.size());
-        pclLastMeasuredUs = endUs;
+        pclLatencies.Add(endUs, elapsedUs);
     }
 
     pclWorkerRunning = false;
@@ -1273,7 +1309,6 @@ uint64_t pingSentUs = 0;      // Sent and not marked yet
 uint64_t pingFrameId = 0;     // Marked, waiting for the frame's simulation start
 uint64_t pingFrameSentUs = 0; //
 double pingEmaMs = 0.0;
-uint64_t pingLastSampleUs = 0;
 uint32_t pingSamples = 0;
 std::atomic_bool pingThreadRunning = false;
 
@@ -1282,8 +1317,7 @@ void AddPingSample(uint64_t sentUs, uint64_t simStartUs)
     const double ms = (simStartUs - sentUs) / 1000.0;
 
     // PresentMon's average of the input to frame start
-    pingEmaMs = pingSamples == 0 || simStartUs - pingLastSampleUs > 3'000'000 ? ms : pingEmaMs + 0.1 * (ms - pingEmaMs);
-    pingLastSampleUs = simStartUs;
+    pingEmaMs = pingSamples == 0 ? ms : pingEmaMs + 0.1 * (ms - pingEmaMs);
     pingSamples++;
 }
 
@@ -1369,7 +1403,7 @@ std::optional<double> InputCommon::get_input_wait_ms(uint32_t* pings)
     if (pings != nullptr)
         *pings = pingSamples;
 
-    if (pingSamples == 0 || NowUs() - pingLastSampleUs > 3'000'000)
+    if (pingSamples == 0)
         return std::nullopt;
 
     return pingEmaMs;
@@ -1898,19 +1932,15 @@ std::optional<double> InputCommon::get_pc_latency_ms(PcLatencySource& source, do
     {
         std::lock_guard lock(pclMutex);
 
-        if (pclLatencyCount != 0 && NowUs() - pclLastMeasuredUs < 1'000'000)
+        if (pclLatencies.count != 0 && NowUs() - pclLastMeasuredUs < 1'000'000)
         {
-            totalUs = 0;
-            totalDisplayUs = 0;
+            const auto render = pclLatencies.Total(pclAverageUs);
+            const auto display = pclPresentLatencies.Total(pclAverageUs);
 
-            for (size_t i = 0; i < pclLatencyCount; i++)
-                totalUs += pclLatencies[i];
-
-            for (size_t i = 0; i < pclPresentCount; i++)
-                totalDisplayUs += pclPresentLatencies[i];
-
-            count = static_cast<uint32_t>(pclLatencyCount);
-            displayCount = static_cast<uint32_t>(pclPresentCount);
+            totalUs = render.first;
+            count = render.second;
+            totalDisplayUs = display.first;
+            displayCount = display.second;
             source = PcLatencySource::GpuFence;
         }
     }

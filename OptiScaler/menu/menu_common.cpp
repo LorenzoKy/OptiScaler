@@ -2815,11 +2815,49 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                                              : fakeFramesCount > 0       ? (uint32_t) fakeFramesCount
                                                                          : 0;
 
+            // The values that change every frame, as their average over the update interval so they can be read
+            struct ShownTimes
+            {
+                double frameRate = 0.0;
+                double frameTime = 0.0;
+                double averageFrameTime = 0.0;
+                double lastFrameTime = 0.0;
+                double lastUpscalerTime = 0.0;
+                double averageUpscalerTime = 0.0;
+            };
+
+            static ShownTimes shown;
+            static ShownTimes summed;
+            static uint32_t summedFrames = 0;
+            static double shownAt = 0.0;
+
+            summed.frameRate += frameRate;
+            summed.frameTime += frameTime;
+            summed.averageFrameTime += averageFrameTime;
+            summed.lastFrameTime += state.frameTimes.empty() ? 0.0 : state.frameTimes.back();
+            summed.lastUpscalerTime += state.upscaleTimes.empty() ? 0.0 : state.upscaleTimes.back();
+            summed.averageUpscalerTime += averageUpscalerFT;
+            summedFrames++;
+
+            const float updateIntervalMs = config->FpsOverlayUpdateInterval.value_or_default();
+
+            if (updateIntervalMs < 1.0f || shownAt <= 0.001 || now < shownAt || now - shownAt >= updateIntervalMs)
+            {
+                const double frames = static_cast<double>(summedFrames);
+                shown = { summed.frameRate / frames,        summed.frameTime / frames,
+                          summed.averageFrameTime / frames, summed.lastFrameTime / frames,
+                          summed.lastUpscalerTime / frames, summed.averageUpscalerTime / frames };
+
+                summed = {};
+                summedFrames = 0;
+                shownAt = now;
+            }
+
             // With frame generation also the base frame rate
             const std::string fpsValue =
                 interpolatedFrameCount
-                    ? StrFmt("%6.1f/%5.1f", frameRate, frameRate / (double) (interpolatedFrameCount + 1))
-                    : StrFmt("%6.1f", frameRate);
+                    ? StrFmt("%6.1f/%5.1f", shown.frameRate, shown.frameRate / (double) (interpolatedFrameCount + 1))
+                    : StrFmt("%6.1f", shown.frameRate);
 
             // Output FPS gained without that GPU work, assuming the GPU is the limit. The work is in every real
             // frame, the frame generation multiplies the frames it gains.
@@ -2857,10 +2895,10 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                 line.Label(api + L(" | FPS: ", " | FPS ")).Value(fpsValue);
 
                 if (overlayType == FpsOverlay_Simple)
-                    line.Label(", ").Value(StrFmt("%7.2f ms", frameTime));
+                    line.Label(", ").Value(StrFmt("%7.2f ms", shown.frameTime));
 
                 if (overlayType >= FpsOverlay_Detailed || showLows)
-                    line.Label(L(", Avg: ", " Avg ")).Value(StrFmt("%6.1f", 1000.0f / averageFrameTime));
+                    line.Label(L(", Avg: ", " Avg ")).Value(StrFmt("%6.1f", 1000.0 / shown.averageFrameTime));
 
                 if (showLows)
                     line.Label(L(", 1% Low: ", " 1% ")).Value(StrFmt("%6.1f", gStatsOnePercentLowFps));
@@ -2936,7 +2974,7 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
 
             if (overlayType >= FpsOverlay_Simple && config->FpsOverlayShowLatency.value_or_default())
             {
-                constexpr auto delayBetweenPollsMs = 500;
+                constexpr auto delayBetweenPollsMs = 250;
                 static auto previousPoll = 0.0;
                 static std::optional<double> latency;
                 static PcLatencySource source = PcLatencySource::None;
@@ -3016,9 +3054,9 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
             {
                 OverlayLine line;
                 line.Label(L("Frame Time: ", "FT "))
-                    .Value(StrFmt("%7.2f ms", state.frameTimes.back()))
+                    .Value(StrFmt("%7.2f ms", shown.lastFrameTime))
                     .Label(L(", Avg: ", " Avg "))
-                    .Value(StrFmt("%7.2f ms", averageFrameTime));
+                    .Value(StrFmt("%7.2f ms", shown.averageFrameTime));
 
                 if (overlayType >= FpsOverlay_DetailedGraph)
                 {
@@ -3035,9 +3073,9 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
             {
                 OverlayLine line;
                 line.Label(L("Upscaler Time: ", "UT "))
-                    .Value(StrFmt("%7.2f ms", state.upscaleTimes.back()))
+                    .Value(StrFmt("%7.2f ms", shown.lastUpscalerTime))
                     .Label(L(", Avg: ", " Avg "))
-                    .Value(StrFmt("%7.2f ms", averageUpscalerFT));
+                    .Value(StrFmt("%7.2f ms", shown.averageUpscalerTime));
 
                 addCost(line, averageUpscalerFT);
 
@@ -3135,7 +3173,8 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
             // The display's refresh rate, with VRR the frames it shows per second
             if (overlayType >= FpsOverlay_Simple && config->FpsOverlayShowRefreshRate.value_or_default())
             {
-                constexpr auto delayBetweenPollsMs = 250;
+                // Often enough to catch the refresh going up to the VRR range's top for a moment, Avg has the trend
+                constexpr auto delayBetweenPollsMs = 100;
                 static auto previousPoll = 0.0;
                 static std::optional<OverlayTelemetry::RefreshRate> refresh;
 
@@ -3399,7 +3438,69 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
             shadowVec.w = 0.35f + 0.65f * shadowStrength;
             const ImU32 shadowColor = ImGui::ColorConvertFloat4ToU32(shadowVec);
 
+            // The outline is a filled circle of opaque copies around the text, translucent ones would add up unevenly
+            std::vector<ImVec2> outlineOffsets;
+
+            if (shadowType == FpsOverlayShadow_Outline)
+            {
+                const int radius = static_cast<int>(shadowSize);
+                const int limit = radius * radius + radius;
+
+                for (int dy = -radius; dy <= radius; dy++)
+                {
+                    for (int dx = -radius; dx <= radius; dx++)
+                    {
+                        if ((dx != 0 || dy != 0) && dx * dx + dy * dy <= limit)
+                            outlineOffsets.emplace_back(static_cast<float>(dx), static_cast<float>(dy));
+                    }
+                }
+
+                shadowVec.w = 1.0f;
+            }
+
+            const ImU32 outlineColor = ImGui::ColorConvertFloat4ToU32(shadowVec);
+
             auto partPx = [&](const OverlayPart& part) { return part.value ? valuePx : labelPx; };
+
+            // Digits of the values take the widest digit's width, so changing numbers don't shift with fonts whose
+            // digits differ in width
+            float digitWidth = 0.0f;
+            for (char digit = '0'; digit <= '9'; digit++)
+                digitWidth = std::max(digitWidth, font->CalcTextSizeA(valuePx, FLT_MAX, 0.0f, &digit, &digit + 1).x);
+
+            // Calls place(begin, end, x) for the part's text, the value's digits one at a time centered in their
+            // width. The part's width.
+            auto layoutPart = [&](const OverlayPart& part, auto&& place)
+            {
+                const float px = partPx(part);
+                const char* text = part.text.c_str();
+                const char* end = text + part.text.size();
+                float x = 0.0f;
+
+                auto isDigit = [&](const char* c) { return part.value && *c >= '0' && *c <= '9'; };
+
+                while (text < end)
+                {
+                    if (isDigit(text))
+                    {
+                        const float width = font->CalcTextSizeA(px, FLT_MAX, 0.0f, text, text + 1).x;
+                        place(text, text + 1, x + std::round((digitWidth - width) * 0.5f));
+                        x += digitWidth;
+                        text++;
+                        continue;
+                    }
+
+                    const char* runEnd = text;
+                    while (runEnd < end && !isDigit(runEnd))
+                        runEnd++;
+
+                    place(text, runEnd, x);
+                    x += font->CalcTextSizeA(px, FLT_MAX, 0.0f, text, runEnd).x;
+                    text = runEnd;
+                }
+
+                return x;
+            };
 
             auto measureLine = [&](OverlayLine& line)
             {
@@ -3408,7 +3509,7 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                 for (auto& part : line.parts)
                 {
                     const float px = partPx(part);
-                    part.width = font->CalcTextSizeA(px, FLT_MAX, 0.0f, part.text.c_str()).x;
+                    part.width = layoutPart(part, [](const char*, const char*, float) {});
                     size.x += part.width;
                     size.y = std::max(size.y, px);
                 }
@@ -3419,29 +3520,26 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
             for (auto& line : lines)
                 measureLine(line);
 
-            auto drawText = [&](ImDrawList* drawList, float px, ImVec2 pos, ImU32 color, const char* text)
+            // On whole pixels, the shadows of a line under all its text so they don't cover the next part
+            auto drawText = [&](ImDrawList* drawList, float px, ImVec2 pos, ImU32 color, const char* text,
+                                const char* end, bool shadowPass)
             {
-                if (shadowType == FpsOverlayShadow_Shadow)
+                pos = ImVec2(std::round(pos.x), std::round(pos.y));
+
+                if (!shadowPass)
+                {
+                    drawList->AddText(font, px, pos, color, text, end);
+                }
+                else if (shadowType == FpsOverlayShadow_Shadow)
                 {
                     for (float d = 1.0f; d <= shadowSize; d++)
-                        drawList->AddText(font, px, ImVec2(pos.x + d, pos.y + d), shadowColor, text);
+                        drawList->AddText(font, px, ImVec2(pos.x + d, pos.y + d), shadowColor, text, end);
                 }
                 else if (shadowType == FpsOverlayShadow_Outline)
                 {
-                    for (int dx = -1; dx <= 1; dx++)
-                    {
-                        for (int dy = -1; dy <= 1; dy++)
-                        {
-                            if (dx != 0 || dy != 0)
-                            {
-                                drawList->AddText(font, px, ImVec2(pos.x + dx * shadowSize, pos.y + dy * shadowSize),
-                                                  shadowColor, text);
-                            }
-                        }
-                    }
+                    for (const auto& offset : outlineOffsets)
+                        drawList->AddText(font, px, pos + offset, outlineColor, text, end);
                 }
-
-                drawList->AddText(font, px, pos, color, text);
             };
 
             // Parts of different sizes share the baseline
@@ -3455,16 +3553,26 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                     maxAscent = std::max(maxAscent, font->GetFontBaked(partPx(part))->Ascent);
 
                 auto drawList = ImGui::GetWindowDrawList();
-                auto pos = ImGui::GetCursorScreenPos();
+                const auto start = ImGui::GetCursorScreenPos();
 
-                for (const auto& part : line.parts)
+                for (const bool shadowPass : { true, false })
                 {
-                    const float px = partPx(part);
-                    const float y = pos.y + maxAscent - font->GetFontBaked(px)->Ascent;
+                    if (shadowPass && shadowType == FpsOverlayShadow_Off)
+                        continue;
 
-                    const ImU32 color = part.color != 0 ? part.color : part.value ? valueColor : labelColor;
-                    drawText(drawList, px, ImVec2(pos.x, y), color, part.text.c_str());
-                    pos.x += part.width;
+                    auto pos = start;
+
+                    for (const auto& part : line.parts)
+                    {
+                        const float px = partPx(part);
+                        const float y = pos.y + maxAscent - font->GetFontBaked(px)->Ascent;
+                        const ImU32 color = part.color != 0 ? part.color : part.value ? valueColor : labelColor;
+
+                        layoutPart(part, [&](const char* text, const char* end, float x)
+                                   { drawText(drawList, px, ImVec2(pos.x + x, y), color, text, end, shadowPass); });
+
+                        pos.x += part.width;
+                    }
                 }
 
                 ImGui::Dummy(line.size);
@@ -8379,7 +8487,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                   "ShowBottleneck=true\nShowUpscalerTime=true\n"
                   "RowOrder=fps,frametime,upscale,upscaler,latency,bottleneck\n"
                   "Font=seguisb.ttf\nAlpha=0.55\nRounding=6\nLabelColor=0xC8C8C8\nValueColor=0xFFFFFF\n"
-                  "GraphColor=0x3CD070\nShadow=1\nShadowStrength=0.6\n" },
+                  "GraphColor=0x3CD070\nShadow=1\nShadowStrength=0.6\nUpdateInterval=250\n" },
                 { "Afterburner-Like",
                   "As MSI Afterburner's on-screen display: Unispace Bold (RTSS' font, when it's installed), orange "
                   "labels and white values, outlined with no background.\n"
@@ -8387,7 +8495,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                   "OverlaysUseTheme=false\nType=3\nShowLows=true\nShowGpu=true\nShowVram=true\nShowCpu=true\n"
                   "ShowRam=true\nCompactLabels=true\nRowOrder=gpu,vram,cpu,ram,fps,frametime\n"
                   "Font=unispace bd.ttf\nAlpha=0\nRounding=0\nLabelColor=0xFF9C00\nValueColor=0xFFFFFF\n"
-                  "GraphColor=0xFF9C00\nShadow=2\nShadowStrength=1\nShadowColor=0x000000\n" },
+                  "GraphColor=0xFF9C00\nShadow=2\nShadowStrength=0.5\nShadowColor=0x000000\nUpdateInterval=500\n" },
                 { "Latency Lab",
                   "A strip at the top center for latency tuning: Bahnschrift, cyan values on a dark glass panel.\n"
                   "FPS with 1% and 0.1% lows, PC and render latency, frame time, refresh rate and the bottleneck.",
@@ -8395,7 +8503,8 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                   "ShowLatency=true\nLatencyType=2\nShowRefreshRate=true\nShowBottleneck=true\nCompactLabels=true\n"
                   "RowOrder=fps,latency,frametime,refresh,bottleneck\nFont=bahnschrift.ttf\nAlpha=0.35\n"
                   "BGColor=0x0A0F14\nRounding=10\nLabelColor=0x8A9BA8\nValueColor=0x00E5FF\nGraphColor=0x00E5FF\n"
-                  "LabelScale=0.85\nValueScale=1.1\nLetterSpacing=0.5\nShadow=1\nShadowStrength=0.5\n" },
+                  "LabelScale=0.85\nValueScale=1.1\nLetterSpacing=0.5\nShadow=1\nShadowStrength=0.5\n"
+                  "UpdateInterval=250\n" },
             };
 
             static std::string presetStatus;
@@ -8795,6 +8904,15 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
             scaleSlider("Value Size", config->FpsOverlayValueScale);
             ShowTooltip("The numbers");
 
+            float updateInterval = config->FpsOverlayUpdateInterval.value_or_default();
+            if (ImGui::SliderFloat("Update Interval", &updateInterval, 0.0f, 1000.0f,
+                                   updateInterval < 1.0f ? "Every frame" : "%.0f ms", ImGuiSliderFlags_AlwaysClamp))
+            {
+                config->FpsOverlayUpdateInterval = std::round(updateInterval / 10.0f) * 10.0f;
+            }
+            ShowTooltip("How long FPS, frame time and upscaler time stay before they change, shown as their average "
+                        "over that time. The far left updates them every frame.");
+
             const char* shadowTypes[] = { "Off", "Shadow", "Outline" };
             int shadowType = config->FpsOverlayShadowType.value_or_default();
             if (ImGui::Combo("Text Shadow", &shadowType, shadowTypes, IM_ARRAYSIZE(shadowTypes)))
@@ -8807,7 +8925,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
             {
                 config->FpsOverlayShadowStrength = shadowStrength;
             }
-            ShowTooltip("Thickness and darkness of the shadow or outline");
+            ShowTooltip("Thickness and darkness of the shadow, thickness of the outline");
             ImGui::EndDisabled();
 
             SectionTitle("Colors");
@@ -8838,6 +8956,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                 config->FpsOverlayFont.reset();
                 config->FpsOverlayFontSize.reset();
                 config->FpsOverlayLetterSpacing.reset();
+                config->FpsOverlayUpdateInterval.reset();
                 config->FpsOverlayLabelColor.reset();
                 config->FpsOverlayValueColor.reset();
                 config->FpsOverlayLabelScale.reset();
