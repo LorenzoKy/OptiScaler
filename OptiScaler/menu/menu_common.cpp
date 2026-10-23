@@ -8480,25 +8480,18 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
             };
 
             static const OverlayPreset presets[] = {
-                { "Opti-Like",
-                  "OptiScaler's overlay, refined: Segoe UI Semibold on a soft rounded panel with a shadow.\n"
-                  "FPS with lows, frame time graph, upscaler and ratio, PC latency and the bottleneck.",
+                { "Opti-Like", "OptiScaler's overlay, refined: FPS, frame time graph, upscaler, latency, bottleneck",
                   "OverlaysUseTheme=false\nType=3\nShowLows=true\nShowRatio=true\nShowLatency=true\n"
                   "ShowBottleneck=true\nShowUpscalerTime=true\n"
                   "RowOrder=fps,frametime,upscale,upscaler,latency,bottleneck\n"
                   "Font=seguisb.ttf\nAlpha=0.55\nRounding=6\nLabelColor=0xC8C8C8\nValueColor=0xFFFFFF\n"
                   "GraphColor=0x3CD070\nShadow=1\nShadowStrength=0.6\nUpdateInterval=250\n" },
-                { "Afterburner-Like",
-                  "As MSI Afterburner's on-screen display: Unispace Bold (RTSS' font, when it's installed), orange "
-                  "labels and white values, outlined with no background.\n"
-                  "GPU, VRAM, CPU and RAM first, then FPS with lows and the frame time graph, compact labels.",
+                { "Afterburner-Like", "As MSI Afterburner: hardware rows first, orange labels, outlined text",
                   "OverlaysUseTheme=false\nType=3\nShowLows=true\nShowGpu=true\nShowVram=true\nShowCpu=true\n"
                   "ShowRam=true\nCompactLabels=true\nRowOrder=gpu,vram,cpu,ram,fps,frametime\n"
                   "Font=unispace bd.ttf\nAlpha=0\nRounding=0\nLabelColor=0xFF9C00\nValueColor=0xFFFFFF\n"
                   "GraphColor=0xFF9C00\nShadow=2\nShadowStrength=0.5\nShadowColor=0x000000\nUpdateInterval=500\n" },
-                { "Latency Lab",
-                  "A strip at the top center for latency tuning: Bahnschrift, cyan values on a dark glass panel.\n"
-                  "FPS with 1% and 0.1% lows, PC and render latency, frame time, refresh rate and the bottleneck.",
+                { "Latency Lab", "Top center strip for latency tuning: lows, PC and render latency, refresh rate",
                   "OverlaysUseTheme=false\nPos=4\nHorizontal=true\nType=2\nShowLows=true\nShowPointOneLow=true\n"
                   "ShowLatency=true\nLatencyType=2\nShowRefreshRate=true\nShowBottleneck=true\nCompactLabels=true\n"
                   "RowOrder=fps,latency,frametime,refresh,bottleneck\nFont=bahnschrift.ttf\nAlpha=0.35\n"
@@ -8612,23 +8605,14 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
 
                     case OverlayRow_Upscale:
                         optionCheckbox(name, config->FpsOverlayShowRatio,
-                                       "The upscaler, the render -> output resolution and the upscale ratio.\n"
-                                       "With the FSR 4 model and preset, or the DLSS preset when it's overridden.");
+                                       "Upscaler, render -> output resolution and ratio, with its model or preset");
                         break;
 
                     case OverlayRow_Latency:
                         optionCheckbox(name, config->FpsOverlayShowLatency,
-                                       "Latency and the low latency method, needs the game's Reflex, XeLL or "
-                                       "AntiLag 2 markers. Latency Type in Metric Options picks what it shows.\n"
-                                       "Render Latency: from the simulation start to the end of the GPU base render "
-                                       "and frame generation pass (D3D12, D3D11, Vulkan). Estimated (est.) without "
-                                       "GPU time.\n"
-                                       "PC Latency: an estimate close to FrameView and PresentMon. The input's wait "
-                                       "for the simulation start, timed with pings as PC Latency Stats does, plus the "
-                                       "simulation start to the end of every frame shown, generated frames included. "
-                                       "The end is the GPU's own timestamp on D3D12, else when its work is done, not "
-                                       "the display's flip FrameView reads, so a few ms of difference are expected.\n"
-                                       "Neither includes the mouse or the display, which tools like FLM measure.");
+                                       "Needs the game's Reflex, XeLL or AntiLag 2 markers.\n"
+                                       "PC Latency: estimate close to FrameView, a few ms apart.\n"
+                                       "Render Latency: simulation start to the GPU's end of the frame.");
                         break;
 
                     case OverlayRow_FrameTime:
@@ -8638,9 +8622,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                         if (ImGui::Checkbox(name, &showFrameTime))
                             config->FpsOverlayShowFrameTime = showFrameTime;
 
-                        ShowTooltip("Frame Time and average Frame Time.\n"
-                                    "By default shown from Detailed; toggle here to show it in Simple or hide it in "
-                                    "Detailed/Full.");
+                        ShowTooltip("Frame time and its average, by default from Detailed");
                         from = config->FpsOverlayShowFrameTime.has_value()
                                    ? (config->FpsOverlayShowFrameTime.value() ? "Simple" : "Off")
                                    : "Detailed";
@@ -8659,47 +8641,35 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
 
                     case OverlayRow_Bottleneck:
                         optionCheckbox(name, config->FpsOverlayShowBottleneck,
-                                       "What limits the frame rate right now.\n"
-                                       "GPU Bound: the CPU waits for the GPU, a lower resolution or settings help.\n"
-                                       "CPU Bound: the CPU barely waits, the game's CPU work sets the frame rate.\n"
-                                       "FPS Limit: OptiScaler's FPS limit holds the frame rate.\n"
-                                       "Refresh Limit: V-Sync or a cap at the display's refresh rate holds it.\n"
-                                       "CPU Waits: how long the game waits per frame, in the low latency output's "
-                                       "sleep and in its present. An in-game FPS cap looks like GPU Bound.");
+                                       "What limits the frame rate: GPU, CPU, FPS Limit or Refresh Limit.\n"
+                                       "CPU Waits: time per frame the CPU waits for the GPU.\n"
+                                       "An in-game FPS cap looks like GPU Bound.");
                         break;
 
                     case OverlayRow_Refresh:
                         optionCheckbox(name, config->FpsOverlayShowRefreshRate,
-                                       "The rate the display refreshes at, from its vertical blanks, and its average "
-                                       "over the last 1000 refreshes.\n"
-                                       "With VRR it follows the frames the display shows (doubled below the VRR "
-                                       "range), without it it's the display's refresh rate.");
+                                       "The display's actual refresh rate over the last 0.1 s, and its average.\n"
+                                       "With VRR it follows the frames shown.");
                         break;
 
                     case OverlayRow_Vram:
                         optionCheckbox(name, config->FpsOverlayShowVram,
-                                       "Video memory the game uses and the budget Windows gives it.\n"
-                                       "Above the budget Windows moves memory out to system RAM, which stutters.\n"
-                                       "Also shows the video memory clock when the GPU reports it.");
+                                       "VRAM the game uses and its budget, above it the game stutters.\n"
+                                       "Plus the memory clock when the GPU reports it.");
                         break;
 
                     case OverlayRow_Gpu:
-                        optionCheckbox(name, config->FpsOverlayShowGpu,
-                                       "GPU temperature, power draw, core voltage and core clock.\n"
-                                       "Read from AMD ADL2 or NVIDIA NVML/NVAPI, with HWiNFO/Afterburner fallback.");
+                        optionCheckbox(name, config->FpsOverlayShowGpu, "GPU temperature, power, voltage and clock");
                         break;
 
                     case OverlayRow_Cpu:
                         optionCheckbox(name, config->FpsOverlayShowCpu,
-                                       "CPU temperature, package power, core voltage, and clock.\n"
-                                       "Read from AMD Adrenalin CPU metrics, HWiNFO/Afterburner/CoreTemp shared "
-                                       "memory, or Windows performance counters.");
+                                       "CPU temperature, power, voltage and clock.\n"
+                                       "Some need HWiNFO, Afterburner or Core Temp running.");
                         break;
 
                     case OverlayRow_Ram:
-                        optionCheckbox(name, config->FpsOverlayShowRam,
-                                       "System RAM in use and total physical memory, plus optional Game RAM and "
-                                       "Commit Charge in Metric Options.");
+                        optionCheckbox(name, config->FpsOverlayShowRam, "System RAM in use and total");
                         break;
 
                     default:
@@ -8750,8 +8720,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                            "Adds the 0.1%% low FPS of the last 5000 frames to the FPS row, for the rare stutters");
 
             optionCheckbox("FPS Cost", config->FpsOverlayShowFpsCost,
-                           "Adds the FPS the upscaler takes to the Upscaler Time row: the output FPS gained "
-                           "without its GPU time, assuming the GPU is the limit.");
+                           "FPS the upscaler costs, assuming the GPU is the limit");
 
             optionCheckbox("Game RAM", config->FpsOverlayShowGameRam,
                            "Adds the game process's physical RAM usage (working set) to the RAM row.");
@@ -8760,18 +8729,14 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                            "Adds the total system commit charge (RAM + pagefile) to the RAM row.");
 
             optionCheckbox("Hardware Names", config->FpsOverlayShowHardwareNames,
-                           "Shows the actual GPU and CPU model names instead of generic GPU/CPU labels on their "
-                           "rows.\n"
-                           "Shortened to the model name when Compact Labels is enabled.");
+                           "GPU and CPU model names instead of GPU/CPU");
 
             const char* latencyTypes[] = { "PC Latency", "Render Latency", "Both" };
             int latencyType = config->FpsOverlayLatencyType.value_or_default();
             if (ImGui::Combo("Latency Type", &latencyType, latencyTypes, IM_ARRAYSIZE(latencyTypes)))
                 config->FpsOverlayLatencyType = (FpsOverlayLatency) latencyType;
 
-            ShowTooltip("What the PC Latency row shows.\n"
-                        "PC Latency: from the input to the frames shown, an estimate close to FrameView's.\n"
-                        "Render Latency: from the simulation start to the end of the shown frame's GPU work.");
+            ShowTooltip("What the latency row shows");
 
             ImGui::TreePop();
         }
@@ -8874,8 +8839,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                 else
                     config->FpsOverlayFont = entered;
             }
-            ShowTooltip("File name in C:\\Windows\\Fonts (e.g. consola.ttf) or full path to a .ttf/.otf file. Press "
-                        "Enter to apply.");
+            ShowTooltip("A file in C:\\Windows\\Fonts or a full path, Enter applies it");
 
             // 0 is the menu's font size
             float fontSizeValue = config->FpsOverlayFontSize.value_or(7.0f);
@@ -8910,8 +8874,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
             {
                 config->FpsOverlayUpdateInterval = std::round(updateInterval / 10.0f) * 10.0f;
             }
-            ShowTooltip("How long FPS, frame time and upscaler time stay before they change, shown as their average "
-                        "over that time. The far left updates them every frame.");
+            ShowTooltip("How often FPS and times change, averaged in between. Higher is easier to read.");
 
             const char* shadowTypes[] = { "Off", "Shadow", "Outline" };
             int shadowType = config->FpsOverlayShadowType.value_or_default();
@@ -8985,8 +8948,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                 settingsCodeStatus = "Copied to the clipboard";
             }
 
-            ShowTooltip("Copies the FPS overlay's settings that differ from the defaults as a code.\n"
-                        "Keep it to paste it back after an update, or share it.");
+            ShowTooltip("Copies your overlay settings as a code to keep or share");
 
             ImGui::SameLine();
 
