@@ -24,3 +24,7 @@ struct ScopedSkipSpoofingThread
 struct ScopedCreatingD3DDevice
 {
 };
+
+struct ScopedSkipDxgiLoadChecks
+{
+};

@@ -40,3 +40,6 @@
 #include <vector>
 
 #include "AsiLog.h"
+
+// The plugin's own module, the ImGui Win32 backend takes its instance from it
+inline HMODULE dllModule = nullptr;

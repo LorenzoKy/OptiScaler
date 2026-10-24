@@ -15,6 +15,9 @@
 
 using Microsoft::WRL::ComPtr;
 
+// The header of the Win32 backend keeps it out of its includes
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 // OptiScaler's FPS overlay as a plugin: loaded by OptiScaler from its plugins folder (or by any ASI loader), it
 // hooks the Present of the game's swapchain on its own, so it needs nothing from OptiScaler's DLL.
 
@@ -710,6 +713,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
     if (reason == DLL_PROCESS_ATTACH)
     {
         g_self = module;
+        dllModule = module;
         DisableThreadLibraryCalls(module);
 
         // Not under the loader lock
