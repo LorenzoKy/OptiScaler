@@ -9,7 +9,7 @@
 // Opti's own lists for the frame generation (resource copies, UI) aren't in it, they're submitted by Opti.
 namespace FGGpuTime_Dx12
 {
-// Hooks ExecuteCommandLists through the queue's vtable, once
+// Hooks ExecuteCommandLists of the queue and of the direct and compute queues of its device, each function once
 void Hook(ID3D12CommandQueue* queue);
 
 // Libraries whose submissions are timed, none stops the timing

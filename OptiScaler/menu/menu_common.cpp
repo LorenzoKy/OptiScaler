@@ -8831,9 +8831,8 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                         break;
 
                     case OverlayRow_Clock:
-                        optionCheckbox(
-                            name, config->FpsOverlayShowClock,
-                            "The date and time, in the format Windows uses");
+                        optionCheckbox(name, config->FpsOverlayShowClock,
+                                       "The date and time, in the format Windows uses");
                         break;
 
                     default:
