@@ -112,13 +112,51 @@ BOOL WINAPI hk_ClipCursor(const RECT* rect)
     return o_ClipCursor(rect);
 }
 
+// One detours transaction at a time exists in a process, OptiScaler makes its own while the game starts
+template <typename Attach> LONG RunDetours(Attach&& attach)
+{
+    LONG result = ERROR_INVALID_OPERATION;
+
+    for (int attempt = 0; attempt < 20; attempt++)
+    {
+        if (DetourTransactionBegin() == NO_ERROR)
+        {
+            DetourUpdateThread(GetCurrentThread());
+            attach();
+            result = DetourTransactionCommit();
+
+            if (result == NO_ERROR)
+                return result;
+        }
+
+        Sleep(25);
+    }
+
+    return result;
+}
+
+// The file name of the module that has the code at the address
+std::string ModuleOf(void* address)
+{
+    HMODULE module = nullptr;
+
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCWSTR) address, &module))
+        return "unknown";
+
+    wchar_t path[MAX_PATH] {};
+    GetModuleFileNameW(module, path, MAX_PATH);
+    return std::filesystem::path(path).filename().string();
+}
+
 void InstallCursorHooks()
 {
-    DetourTransactionBegin();
-    DetourUpdateThread(GetCurrentThread());
-    DetourAttach(&(PVOID&) o_SetCursorPos, (PVOID) hk_SetCursorPos);
-    DetourAttach(&(PVOID&) o_ClipCursor, (PVOID) hk_ClipCursor);
-    const LONG result = DetourTransactionCommit();
+    const LONG result = RunDetours(
+        []()
+        {
+            DetourAttach(&(PVOID&) o_SetCursorPos, (PVOID) hk_SetCursorPos);
+            DetourAttach(&(PVOID&) o_ClipCursor, (PVOID) hk_ClipCursor);
+        });
 
     if (result != NO_ERROR)
         LOG_WARN("Cursor hooks failed: {}", (int) result);
@@ -543,14 +581,17 @@ void HookPresent(IDXGISwapChain* swapChain)
     if (SUCCEEDED(swapChain->QueryInterface(IID_PPV_ARGS(&swapChain1))))
         o_Present1 = reinterpret_cast<PFN_Present1>((*reinterpret_cast<void***>(swapChain1.Get()))[22]);
 
-    DetourTransactionBegin();
-    DetourUpdateThread(GetCurrentThread());
-    DetourAttach(&(PVOID&) o_Present, (PVOID) hk_Present);
+    // In DXGI's own code, or in OptiScaler's wrapper of the swapchain when it made the swapchain before this hook
+    LOG_INFO("Present is in {}", ModuleOf((void*) o_Present));
 
-    if (o_Present1 != nullptr)
-        DetourAttach(&(PVOID&) o_Present1, (PVOID) hk_Present1);
+    const LONG result = RunDetours(
+        []()
+        {
+            DetourAttach(&(PVOID&) o_Present, (PVOID) hk_Present);
 
-    const LONG result = DetourTransactionCommit();
+            if (o_Present1 != nullptr)
+                DetourAttach(&(PVOID&) o_Present1, (PVOID) hk_Present1);
+        });
 
     if (result != NO_ERROR)
         LOG_ERROR("Present hook failed: {}", (int) result);
@@ -662,20 +703,20 @@ bool InstallFactoryHooks()
         o_CreateSwapChainForComposition = reinterpret_cast<PFN_CreateSwapChainForComposition>(vtable2[24]);
     }
 
-    DetourTransactionBegin();
-    DetourUpdateThread(GetCurrentThread());
-    DetourAttach(&(PVOID&) o_CreateSwapChain, (PVOID) hk_CreateSwapChain);
+    const LONG result = RunDetours(
+        []()
+        {
+            DetourAttach(&(PVOID&) o_CreateSwapChain, (PVOID) hk_CreateSwapChain);
 
-    if (o_CreateSwapChainForHwnd != nullptr)
-        DetourAttach(&(PVOID&) o_CreateSwapChainForHwnd, (PVOID) hk_CreateSwapChainForHwnd);
+            if (o_CreateSwapChainForHwnd != nullptr)
+                DetourAttach(&(PVOID&) o_CreateSwapChainForHwnd, (PVOID) hk_CreateSwapChainForHwnd);
 
-    if (o_CreateSwapChainForCoreWindow != nullptr)
-        DetourAttach(&(PVOID&) o_CreateSwapChainForCoreWindow, (PVOID) hk_CreateSwapChainForCoreWindow);
+            if (o_CreateSwapChainForCoreWindow != nullptr)
+                DetourAttach(&(PVOID&) o_CreateSwapChainForCoreWindow, (PVOID) hk_CreateSwapChainForCoreWindow);
 
-    if (o_CreateSwapChainForComposition != nullptr)
-        DetourAttach(&(PVOID&) o_CreateSwapChainForComposition, (PVOID) hk_CreateSwapChainForComposition);
-
-    const LONG result = DetourTransactionCommit();
+            if (o_CreateSwapChainForComposition != nullptr)
+                DetourAttach(&(PVOID&) o_CreateSwapChainForComposition, (PVOID) hk_CreateSwapChainForComposition);
+        });
 
     if (result != NO_ERROR)
     {
