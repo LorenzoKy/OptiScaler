@@ -20,6 +20,10 @@ struct Upscaler
     std::string name;
     HMODULE module = nullptr;
 
+    // Only versions the default dlls don't have are listed and created with this dll. An SDK dll also lists the
+    // driver's upscaler, that one stays with Opti's own driver dll.
+    bool listed = false;
+
     PfnFfxCreateContext createContext = nullptr;
     PfnFfxDestroyContext destroyContext = nullptr;
     PfnFfxConfigure configure = nullptr;
@@ -229,15 +233,28 @@ void ExtraUpscalersDx12::AddToVersionList(std::vector<uint64_t>& ids, std::vecto
 
         ids.push_back(upscaler->versionId);
         names.push_back(upscaler->name.c_str());
+
+        if (!upscaler->listed)
+        {
+            upscaler->listed = true;
+            LOG_INFO("Listed extra upscaler {}, id: {:X}", upscaler->name, upscaler->versionId);
+        }
     }
 }
 
-bool ExtraUpscalersDx12::HasVersion(uint64_t versionId) { return versionId != 0 && Find(versionId) != nullptr; }
+bool ExtraUpscalersDx12::HasVersion(uint64_t versionId)
+{
+    if (versionId == 0)
+        return false;
+
+    auto upscaler = Find(versionId);
+    return upscaler != nullptr && upscaler->listed;
+}
 
 HMODULE ExtraUpscalersDx12::Module(uint64_t versionId)
 {
     auto upscaler = Find(versionId);
-    return upscaler != nullptr ? upscaler->module : nullptr;
+    return upscaler != nullptr && upscaler->listed ? upscaler->module : nullptr;
 }
 
 bool ExtraUpscalersDx12::IsModule(HMODULE module)
@@ -252,7 +269,7 @@ ffxReturnCode_t ExtraUpscalersDx12::CreateContext(uint64_t versionId, ffxContext
                                                   ffxCreateContextDescHeader* desc, const ffxAllocationCallbacks* memCb)
 {
     auto upscaler = Find(versionId);
-    if (upscaler == nullptr)
+    if (upscaler == nullptr || !upscaler->listed)
         return FFX_API_RETURN_NO_PROVIDER;
 
     auto result = upscaler->createContext(context, desc, memCb);
