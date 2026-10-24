@@ -234,6 +234,7 @@ template <typename T, size_t N> struct RingBuffer
 const int plotWidth = 360;
 static RingBuffer<float, plotWidth> gFrameTimes;
 static RingBuffer<float, plotWidth> gUpscalerTimes;
+static RingBuffer<float, plotWidth> gFGTimes;
 
 // Frames of the FPS overlay's 1% low (the last 1000) and 0.1% low (all of them), recalculated twice a second
 const int statsFrames = 5000;
@@ -307,6 +308,7 @@ enum OverlayRow : int
     OverlayRow_Latency,
     OverlayRow_FrameTime,
     OverlayRow_UpscalerTime,
+    OverlayRow_FGTime,
     OverlayRow_Bottleneck,
     OverlayRow_Refresh,
     OverlayRow_Vram,
@@ -317,13 +319,15 @@ enum OverlayRow : int
     OverlayRow_COUNT,
 };
 
-static const char* overlayRowKeys[] = { "fps",     "upscale", "latency", "frametime", "upscaler", "bottleneck",
-                                        "refresh", "vram",    "gpu",     "cpu",       "ram",      "clock" };
+static const char* overlayRowKeys[] = { "fps",    "upscale",    "latency", "frametime", "upscaler",
+                                        "fgtime", "bottleneck", "refresh", "vram",      "gpu",
+                                        "cpu",    "ram",        "clock" };
 static const char* overlayRowNames[] = { "FPS",
                                          "Upscaler & Ratio",
                                          "PC Latency (Experimental)",
                                          "Frame Time",
                                          "Upscaler Time",
+                                         "Frame Generation Time",
                                          "Bottleneck",
                                          "Refresh Rate / VRR (Experimental)",
                                          "VRAM",
@@ -2549,6 +2553,7 @@ void MenuCommon::UpdateFrameTimeAverages(RenderMenuContext& ctx)
         float lastUT = static_cast<float>(state.upscaleTimes.empty() ? 0.0f : state.upscaleTimes.back());
         gFrameTimes.Push(lastFT);
         gUpscalerTimes.Push(lastUT);
+        gFGTimes.Push(static_cast<float>(state.fgTimes.empty() ? 0.0f : state.fgTimes.back()));
 
         averageFrameTime = gFrameTimes.Average();
         averageUpscalerFT = gUpscalerTimes.Average();
@@ -2834,6 +2839,8 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                 double lastFrameTime = 0.0;
                 double lastUpscalerTime = 0.0;
                 double averageUpscalerTime = 0.0;
+                double lastFGTime = 0.0;
+                double averageFGTime = 0.0;
             };
 
             static ShownTimes shown;
@@ -2847,6 +2854,8 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
             summed.lastFrameTime += state.frameTimes.empty() ? 0.0 : state.frameTimes.back();
             summed.lastUpscalerTime += state.upscaleTimes.empty() ? 0.0 : state.upscaleTimes.back();
             summed.averageUpscalerTime += averageUpscalerFT;
+            summed.lastFGTime += state.fgTimes.empty() ? 0.0 : state.fgTimes.back();
+            summed.averageFGTime += gFGTimes.Average();
             summedFrames++;
 
             const float updateIntervalMs = config->FpsOverlayUpdateInterval.value_or_default();
@@ -2856,7 +2865,8 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                 const double frames = static_cast<double>(summedFrames);
                 shown = { summed.frameRate / frames,        summed.frameTime / frames,
                           summed.averageFrameTime / frames, summed.lastFrameTime / frames,
-                          summed.lastUpscalerTime / frames, summed.averageUpscalerTime / frames };
+                          summed.lastUpscalerTime / frames, summed.averageUpscalerTime / frames,
+                          summed.lastFGTime / frames,       summed.averageFGTime / frames };
 
                 summed = {};
                 summedFrames = 0;
@@ -3097,6 +3107,30 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                 }
 
                 rows[OverlayRow_UpscalerTime] = std::move(line);
+            }
+
+            // Per real frame and per generated frame, only the D3D12 frame generation is timed
+            if (overlayType >= FpsOverlay_Simple && config->FpsOverlayShowFGTime.value_or_default() &&
+                interpolatedFrameCount != 0 && state.currentFG != nullptr)
+            {
+                OverlayLine line;
+                line.Label(L("FG Time: ", "FGT "))
+                    .Value(StrFmt("%7.2f ms", shown.lastFGTime))
+                    .Label(L(", Avg: ", " Avg "))
+                    .Value(StrFmt("%7.2f ms", shown.averageFGTime))
+                    .Label(L(", Per Frame: ", " /F "))
+                    .Value(StrFmt("%5.2f ms", shown.averageFGTime / interpolatedFrameCount));
+
+                addCost(line, shown.averageFGTime);
+
+                if (overlayType >= FpsOverlay_FullGraph)
+                {
+                    line.graphId = "##FGTimeGraph";
+                    line.graphData = &gFGTimes;
+                    line.graphMax = 20.0f;
+                }
+
+                rows[OverlayRow_FGTime] = std::move(line);
             }
 
             auto colorOf = [](float r, float g, float b)
@@ -8753,6 +8787,13 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                         from = config->FpsOverlayShowUpscalerTime.value_or_default() ? "Simple" : "Full";
                         break;
 
+                    case OverlayRow_FGTime:
+                        optionCheckbox(name, config->FpsOverlayShowFGTime,
+                                       "D3D12 frame generation's GPU time per real frame and per generated frame.\n"
+                                       "From GPU timestamps around what FSR FG, XeFG or DLSSG submit.\n"
+                                       "Work next to the game's on another queue counts in full.");
+                        break;
+
                     case OverlayRow_Bottleneck:
                         optionCheckbox(name, config->FpsOverlayShowBottleneck,
                                        "What limits the frame rate: GPU, CPU, FPS Limit or Refresh Limit.\n"
@@ -8842,7 +8883,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                            "Adds the 0.1%% low FPS of the last 5000 frames to the FPS row, for the rare stutters");
 
             optionCheckbox("FPS Cost", config->FpsOverlayShowFpsCost,
-                           "FPS the upscaler costs, assuming the GPU is the limit");
+                           "FPS the upscaler and the frame generation cost, assuming the GPU is the limit");
 
             optionCheckbox("Game RAM", config->FpsOverlayShowGameRam,
                            "Adds the game process's physical RAM usage (working set) to the RAM row.");

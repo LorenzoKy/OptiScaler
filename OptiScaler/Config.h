@@ -394,6 +394,7 @@ class Config
     CustomOptional<FpsOverlayLatency> FpsOverlayLatencyType { FpsOverlayLatency_Display };
     CustomOptional<bool, NoDefault> FpsOverlayShowFrameTime;   // No value means Detailed and above
     CustomOptional<bool> FpsOverlayShowUpscalerTime { false }; // Also below the Full overlay type
+    CustomOptional<bool> FpsOverlayShowFGTime { false };
     CustomOptional<bool> FpsOverlayShowFpsCost { false };
     CustomOptional<bool> FpsOverlayShowPointOneLow { false };
     CustomOptional<bool> FpsOverlayShowBottleneck { false };
