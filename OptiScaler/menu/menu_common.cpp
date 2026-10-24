@@ -2472,6 +2472,20 @@ void MenuCommon::FGOutputPresent() { fgOutputPresentRate.Present(Util::Milliseco
 
 void MenuCommon::FGOutputPresents(bool presents) { fgOutputPresentRate.SetEnabled(presents); }
 
+void MenuCommon::FGOutputFramesPresented(uint32_t frames)
+{
+    static double lastMs = 0.0;
+    const auto nowMs = Util::MillisecondsNow();
+
+    if (lastMs > 0.0 && nowMs - lastMs < 250.0)
+    {
+        for (uint32_t i = 1; i <= frames; i++)
+            fgOutputPresentRate.Present(lastMs + (nowMs - lastMs) * i / frames);
+    }
+
+    lastMs = nowMs;
+}
+
 struct VersionCheckStatus
 {
     bool completed = false;
@@ -5500,10 +5514,6 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         state.swapchainApi == API::DX11 &&
         (streamlineVersion == feature_version { 0, 0, 0 } || streamlineVersion > feature_version { 2, 0, 1 });
     inputOptions[nvngxInputIndex].set_disabled(nukemsUnsupportedApi, "Unsupported API");
-
-    // XeFG output requirements
-    auto constexpr xefgOutputIndex = (uint32_t) FGOutput::XeFG;
-    outputOptions[xefgOutputIndex].set_disabled(state.swapchainApi == API::Vulkan, "Unsupported API");
 
     // Flip meter output requirements, the driver is only asked once its swapchain gets created
     auto constexpr flipMeterOutputIndex = (uint32_t) FGOutput::FlipMeter;
