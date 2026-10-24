@@ -408,7 +408,7 @@ class Config
     CustomOptional<bool> FpsOverlayShowHardwareNames { false };
     CustomOptional<bool> FpsOverlayShowUsage { false };        // CPU and GPU usage on their rows
     CustomOptional<bool> FpsOverlayShowClock { false };        // Date and time row
-    CustomOptional<bool> FpsOverlayShowSessionTimer { false }; // Time since OptiScaler started, on the clock row
+    CustomOptional<bool> FpsOverlayShowSessionTimer { false }; // Time since OptiScaler started, on the FPS row
     CustomOptional<bool> FpsOverlayCompactLabels { false };
     // Comma separated row keys: fps, upscale, latency, frametime, upscaler, bottleneck, refresh, vram, gpu, cpu, ram,
     // clock. No value means that order

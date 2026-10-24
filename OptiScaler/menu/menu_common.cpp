@@ -2932,6 +2932,17 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                 if (!featureText.empty() && !upscaleRowShown)
                     line.Label(" | " + featureText);
 
+                // How long OptiScaler has been running
+                if (config->FpsOverlayShowSessionTimer.value_or_default())
+                {
+                    const long long running = std::chrono::duration_cast<std::chrono::seconds>(
+                                                  std::chrono::steady_clock::now() - state.startTime)
+                                                  .count();
+
+                    line.Label(L(" | Session: ", " | Up "))
+                        .Value(StrFmt("%lld:%02lld:%02lld", running / 3600, (running / 60) % 60, running % 60));
+                }
+
                 rows[OverlayRow_Fps] = std::move(line);
             }
 
@@ -3499,13 +3510,12 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                 rows[OverlayRow_Ram] = std::move(line);
             }
 
-            // The date and time, and how long OptiScaler has been running
+            // The date and time
             if (overlayType >= FpsOverlay_Simple && config->FpsOverlayShowClock.value_or_default())
             {
                 constexpr auto delayBetweenPollsMs = 200;
                 static auto previousPoll = 0.0;
                 static std::string dateTime;
-                static std::string session;
 
                 if (previousPoll <= 0.001 || previousPoll + delayBetweenPollsMs < now)
                 {
@@ -3517,19 +3527,10 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                     GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, DATE_SHORTDATE, nullptr, nullptr, date, 64, nullptr);
                     GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT, 0, nullptr, nullptr, time, 64);
                     dateTime = wstring_to_string(std::wstring(date) + L" " + time);
-
-                    const long long running = std::chrono::duration_cast<std::chrono::seconds>(
-                                                  std::chrono::steady_clock::now() - state.startTime)
-                                                  .count();
-                    session = StrFmt("%lld:%02lld:%02lld", running / 3600, (running / 60) % 60, running % 60);
                 }
 
                 OverlayLine line;
                 line.Label(L("Time: ", "")).Value(dateTime);
-
-                if (config->FpsOverlayShowSessionTimer.value_or_default())
-                    line.Label(L(" | Session: ", " Up ")).Value(session);
-
                 rows[OverlayRow_Clock] = std::move(line);
             }
 
@@ -8832,7 +8833,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                     case OverlayRow_Clock:
                         optionCheckbox(
                             name, config->FpsOverlayShowClock,
-                            "The date and time, and how long OptiScaler has been running with Session Timer");
+                            "The date and time, in the format Windows uses");
                         break;
 
                     default:
@@ -8898,7 +8899,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                            "Adds the usage percentage to the GPU and CPU rows, as Task Manager shows it");
 
             optionCheckbox("Session Timer", config->FpsOverlayShowSessionTimer,
-                           "Adds how long OptiScaler has been running to the Date & Time row");
+                           "Adds how long OptiScaler has been running to the FPS row");
 
             const char* latencyTypes[] = { "PC Latency (Experimental)", "Render Latency", "Both" };
             int latencyType = config->FpsOverlayLatencyType.value_or_default();
