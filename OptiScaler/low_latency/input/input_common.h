@@ -153,6 +153,17 @@ class InputCommon
     // The time the output slept since the last call, 0 if it didn't
     static double take_sleep_ms() { return last_sleep_ms.exchange(0.0); }
 
+    // The FPS limit the game asks its low latency sleep for, 0 when it doesn't
+    static float game_fps_limit()
+    {
+        const auto input = activeInput;
+        if (input == LowLatencyInput::None || static_cast<size_t>(input) >= sleep_mode_copies.size())
+            return 0.0f;
+
+        const auto interval = get_sleep_copy(input).minimum_interval_us;
+        return interval > 0 ? 1'000'000.0f / interval : 0.0f;
+    }
+
     static InputResult sleep(const InputContext& inputContext, IUnknown* pDevice,
                              std::optional<uint32_t> frame_id = std::nullopt);
     // toOutput false only tracks the marker, the output gets it another way

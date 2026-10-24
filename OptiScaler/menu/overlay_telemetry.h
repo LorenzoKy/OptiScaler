@@ -35,11 +35,12 @@ struct GpuMetrics
     std::optional<double> voltageV;
     std::optional<uint32_t> coreClockMhz;
     std::optional<uint32_t> memClockMhz;
+    std::optional<double> usagePercent; // The busiest engine, as Task Manager shows it
 
     bool hasAny() const
     {
         return tempC.has_value() || powerW.has_value() || voltageV.has_value() || coreClockMhz.has_value() ||
-               memClockMhz.has_value();
+               memClockMhz.has_value() || usagePercent.has_value();
     }
 };
 
@@ -49,10 +50,12 @@ struct CpuMetrics
     std::optional<double> powerW;
     std::optional<double> voltageV;
     std::optional<uint32_t> clockMhz;
+    std::optional<double> usagePercent;
 
     bool hasAny() const
     {
-        return tempC.has_value() || powerW.has_value() || voltageV.has_value() || clockMhz.has_value();
+        return tempC.has_value() || powerW.has_value() || voltageV.has_value() || clockMhz.has_value() ||
+               usagePercent.has_value();
     }
 };
 
@@ -1124,7 +1127,148 @@ inline std::optional<uint32_t> QueryClockMhz()
 
     return std::nullopt;
 }
+
+// All the CPU's time not spent idle since the last call, the first call has nothing to compare to
+inline std::optional<double> QueryUsagePercent()
+{
+    static uint64_t lastIdle = 0;
+    static uint64_t lastTotal = 0;
+
+    FILETIME idleTime {};
+    FILETIME kernelTime {};
+    FILETIME userTime {};
+    if (!GetSystemTimes(&idleTime, &kernelTime, &userTime))
+        return std::nullopt;
+
+    auto toU64 = [](const FILETIME& time)
+    { return (static_cast<uint64_t>(time.dwHighDateTime) << 32) | time.dwLowDateTime; };
+
+    // Kernel time includes the idle time
+    const uint64_t idle = toU64(idleTime);
+    const uint64_t total = toU64(kernelTime) + toU64(userTime);
+
+    std::optional<double> usage;
+    if (lastTotal != 0 && total > lastTotal && idle >= lastIdle)
+    {
+        const double busy = 1.0 - static_cast<double>(idle - lastIdle) / static_cast<double>(total - lastTotal);
+        usage = std::clamp(busy * 100.0, 0.0, 100.0);
+    }
+
+    lastIdle = idle;
+    lastTotal = total;
+    return usage;
+}
 } // namespace PdhCpu
+
+// The GPU's usage as Task Manager shows it: the "GPU Engine" counters of the adapter's engines summed over the
+// processes, the busiest engine is the usage. Any vendor.
+namespace PdhGpu
+{
+struct PdhCounterItem
+{
+    LPWSTR name;
+    PdhCpu::PdhCounterValue value;
+};
+
+using PFN_PdhGetFormattedCounterArrayW = LONG(__stdcall*)(HANDLE, DWORD, LPDWORD, LPDWORD, PdhCounterItem*);
+
+inline std::optional<double> QueryUsagePercent(LUID luid)
+{
+    static bool initialized = false;
+    static HANDLE query = nullptr;
+    static HANDLE counter = nullptr;
+    static PdhCpu::PFN_PdhCollectQueryData collect = nullptr;
+    static PFN_PdhGetFormattedCounterArrayW getArray = nullptr;
+    static std::vector<uint8_t> buffer;
+
+    if (!initialized)
+    {
+        initialized = true;
+
+        // The counters' provider loads its own modules on the first collect
+        ScopedSkipDxgiLoadChecks skipDxgiLoadChecks {};
+        HMODULE pdh = KernelBaseProxy::GetModuleHandleW_()(L"pdh.dll");
+        if (pdh == nullptr)
+            pdh = NtdllProxy::LoadLibraryExW_Ldr(L"pdh.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+
+        if (pdh != nullptr)
+        {
+            auto openQuery =
+                reinterpret_cast<PdhCpu::PFN_PdhOpenQueryW>(KernelBaseProxy::GetProcAddress_()(pdh, "PdhOpenQueryW"));
+            auto addCounter = reinterpret_cast<PdhCpu::PFN_PdhAddEnglishCounterW>(
+                KernelBaseProxy::GetProcAddress_()(pdh, "PdhAddEnglishCounterW"));
+            collect = reinterpret_cast<PdhCpu::PFN_PdhCollectQueryData>(
+                KernelBaseProxy::GetProcAddress_()(pdh, "PdhCollectQueryData"));
+            getArray = reinterpret_cast<PFN_PdhGetFormattedCounterArrayW>(
+                KernelBaseProxy::GetProcAddress_()(pdh, "PdhGetFormattedCounterArrayW"));
+
+            if (openQuery != nullptr && addCounter != nullptr && collect != nullptr && getArray != nullptr &&
+                openQuery(nullptr, 0, &query) == 0)
+            {
+                if (addCounter(query, L"\\GPU Engine(*)\\Utilization Percentage", 0, &counter) == 0)
+                    collect(query);
+                else
+                    counter = nullptr;
+            }
+        }
+    }
+
+    if (query == nullptr || counter == nullptr || collect(query) != 0)
+        return std::nullopt;
+
+    constexpr DWORD format = 0x00000200 /*PDH_FMT_DOUBLE*/ | 0x00008000 /*PDH_FMT_NOCAP100*/;
+    constexpr LONG moreData = static_cast<LONG>(0x800007D2) /*PDH_MORE_DATA*/;
+
+    DWORD size = static_cast<DWORD>(buffer.size());
+    DWORD count = 0;
+    LONG result = getArray(counter, format, &size, &count,
+                           buffer.empty() ? nullptr : reinterpret_cast<PdhCounterItem*>(buffer.data()));
+
+    if (result == moreData)
+    {
+        buffer.resize(size);
+        result = getArray(counter, format, &size, &count, reinterpret_cast<PdhCounterItem*>(buffer.data()));
+    }
+
+    if (result != 0 || count == 0)
+        return std::nullopt;
+
+    // Instances are pid_<pid>_luid_0x<high>_0x<low>_phys_<n>_eng_<n>_engtype_<type>
+    wchar_t luidTag[40] {};
+    swprintf_s(luidTag, L"luid_0x%08X_0x%08X_", static_cast<uint32_t>(luid.HighPart), luid.LowPart);
+
+    std::vector<std::pair<std::wstring_view, double>> engines;
+    const auto* items = reinterpret_cast<const PdhCounterItem*>(buffer.data());
+
+    for (DWORD i = 0; i < count; i++)
+    {
+        if (items[i].name == nullptr || items[i].value.CStatus > 1 /*PDH_CSTATUS_VALID_DATA, NEW_DATA*/)
+            continue;
+
+        const std::wstring_view name = items[i].name;
+        const auto luidAt = name.find(luidTag);
+        if (luidAt == std::wstring_view::npos)
+            continue;
+
+        const auto engine = name.substr(luidAt);
+        auto it = std::find_if(engines.begin(), engines.end(), [&](const auto& e) { return e.first == engine; });
+
+        if (it == engines.end())
+            engines.emplace_back(engine, items[i].value.doubleValue);
+        else
+            it->second += items[i].value.doubleValue;
+    }
+
+    if (engines.empty())
+        return std::nullopt;
+
+    double busiest = 0.0;
+    for (const auto& engine : engines)
+        busiest = std::max(busiest, engine.second);
+
+    return std::clamp(busiest, 0.0, 100.0);
+}
+} // namespace PdhGpu
 
 // Video memory the game uses and the budget Windows gives it, in bytes
 inline std::optional<std::pair<uint64_t, uint64_t>> PollVram(const GpuInformation& gpuInfo)
@@ -1220,6 +1364,8 @@ inline GpuMetrics PollGpu(const GpuInformation& gpuInfo)
         SharedSensors::QueryAfterburner(&out, nullptr);
     }
 
+    out.usagePercent = PdhGpu::QueryUsagePercent(gpuInfo.luid);
+
     return out;
 }
 
@@ -1268,6 +1414,8 @@ inline CpuMetrics PollCpu(const GpuInformation& gpuInfo)
     // 4. Windows PDH effective CPU clock fallback (works on all Intel & AMD CPUs)
     if (!out.clockMhz.has_value())
         out.clockMhz = PdhCpu::QueryClockMhz();
+
+    out.usagePercent = PdhCpu::QueryUsagePercent();
 
     return out;
 }

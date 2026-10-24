@@ -901,6 +901,9 @@ static const char* overlayIniKeys[] = {
     "FpsOverlayShowGameRam",
     "FpsOverlayShowCommitRam",
     "FpsOverlayShowHardwareNames",
+    "FpsOverlayShowUsage",
+    "FpsOverlayShowClock",
+    "FpsOverlayShowSessionTimer",
     "FpsOverlayCompactLabels",
     "FpsOverlayRowOrder",
     "FpsOverlayRowSpacing",
@@ -971,6 +974,9 @@ void Config::ReadOverlaySettings(bool assign)
     apply(FpsOverlayShowGameRam, readBool("Menu", "FpsOverlayShowGameRam"));
     apply(FpsOverlayShowCommitRam, readBool("Menu", "FpsOverlayShowCommitRam"));
     apply(FpsOverlayShowHardwareNames, readBool("Menu", "FpsOverlayShowHardwareNames"));
+    apply(FpsOverlayShowUsage, readBool("Menu", "FpsOverlayShowUsage"));
+    apply(FpsOverlayShowClock, readBool("Menu", "FpsOverlayShowClock"));
+    apply(FpsOverlayShowSessionTimer, readBool("Menu", "FpsOverlayShowSessionTimer"));
     apply(FpsOverlayCompactLabels, readBool("Menu", "FpsOverlayCompactLabels"));
     apply(FpsOverlayRowOrder, readString("Menu", "FpsOverlayRowOrder", true));
     apply(FpsOverlayRowSpacing, readClamped("FpsOverlayRowSpacing", 0.0f, 32.0f));
@@ -1024,6 +1030,10 @@ void Config::WriteOverlaySettings()
     ini.SetValue("Menu", "FpsOverlayShowCommitRam", GetBoolValue(FpsOverlayShowCommitRam.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayShowHardwareNames",
                  GetBoolValue(FpsOverlayShowHardwareNames.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowUsage", GetBoolValue(FpsOverlayShowUsage.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowClock", GetBoolValue(FpsOverlayShowClock.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowSessionTimer",
+                 GetBoolValue(FpsOverlayShowSessionTimer.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayCompactLabels", GetBoolValue(FpsOverlayCompactLabels.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayRowOrder", FpsOverlayRowOrder.value_for_config_or("auto").c_str());
     ini.SetValue("Menu", "FpsOverlayRowSpacing", GetFloatValue(FpsOverlayRowSpacing.value_for_config()).c_str());

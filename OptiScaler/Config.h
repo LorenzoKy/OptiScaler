@@ -405,9 +405,12 @@ class Config
     CustomOptional<bool> FpsOverlayShowGameRam { true };
     CustomOptional<bool> FpsOverlayShowCommitRam { false };
     CustomOptional<bool> FpsOverlayShowHardwareNames { false };
+    CustomOptional<bool> FpsOverlayShowUsage { false };        // CPU and GPU usage on their rows
+    CustomOptional<bool> FpsOverlayShowClock { false };        // Date and time row
+    CustomOptional<bool> FpsOverlayShowSessionTimer { false }; // Time since OptiScaler started, on the clock row
     CustomOptional<bool> FpsOverlayCompactLabels { false };
-    // Comma separated row keys: fps, upscale, latency, frametime, upscaler, bottleneck, vram, gpu, cpu, ram. No value
-    // means that order
+    // Comma separated row keys: fps, upscale, latency, frametime, upscaler, bottleneck, refresh, vram, gpu, cpu, ram,
+    // clock. No value means that order
     CustomOptional<std::string, NoDefault> FpsOverlayRowOrder;
     CustomOptional<float, NoDefault> FpsOverlayRowSpacing; // No value means the default spacing
     // Milliseconds the values that change every frame are kept, 0 updates them every frame
