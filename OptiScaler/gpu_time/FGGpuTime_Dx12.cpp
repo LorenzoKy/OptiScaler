@@ -157,22 +157,28 @@ bool RecordSlot(Slot& slot, UINT index, D3D12_COMMAND_LIST_TYPE type)
         return false;
     }
 
-    if (timerDevice->CreateCommandList(0, type, slot.allocator, nullptr, IID_PPV_ARGS(&slot.begin)) != S_OK ||
-        timerDevice->CreateCommandList(0, type, slot.allocator, nullptr, IID_PPV_ARGS(&slot.end)) != S_OK)
+    // An allocator records one list at a time, the first is closed before the second is created
+    result = timerDevice->CreateCommandList(0, type, slot.allocator, nullptr, IID_PPV_ARGS(&slot.begin));
+
+    if (result == S_OK)
     {
-        LOG_ERROR("CreateCommandList error");
+        slot.begin->SetName(L"FGGpuTime begin");
+        slot.begin->EndQuery(queryHeap, D3D12_QUERY_TYPE_TIMESTAMP, index * 2);
+        slot.begin->Close();
+
+        result = timerDevice->CreateCommandList(0, type, slot.allocator, nullptr, IID_PPV_ARGS(&slot.end));
+    }
+
+    if (result != S_OK)
+    {
+        LOG_ERROR("CreateCommandList error: {:X}", (UINT) result);
         DeferredRelease::Release(slot.begin);
         DeferredRelease::Release(slot.end);
         DeferredRelease::Release(slot.allocator);
         return false;
     }
 
-    slot.begin->SetName(L"FGGpuTime begin");
     slot.end->SetName(L"FGGpuTime end");
-
-    slot.begin->EndQuery(queryHeap, D3D12_QUERY_TYPE_TIMESTAMP, index * 2);
-    slot.begin->Close();
-
     slot.end->EndQuery(queryHeap, D3D12_QUERY_TYPE_TIMESTAMP, index * 2 + 1);
     slot.end->ResolveQueryData(queryHeap, D3D12_QUERY_TYPE_TIMESTAMP, index * 2, 2, readback,
                                index * 2 * sizeof(UINT64));
@@ -311,8 +317,12 @@ Slot* AcquireSlot(ID3D12CommandQueue* queue)
         if (slot.pending)
             continue;
 
+        // A slot that can't be recorded stops the timing instead of failing on every submission
         if (slot.begin == nullptr && !RecordSlot(slot, index, desc.Type))
+        {
+            timerActive = false;
             return nullptr;
+        }
 
         nextSlot[type] = (index - type * SlotsPerType + 1) % SlotsPerType;
         slot.pending = true;
