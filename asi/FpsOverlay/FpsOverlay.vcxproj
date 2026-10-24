@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{6D1C3A52-7B1E-4F0A-9C55-0F3B6A1E2D47}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>FpsOverlay</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>FpsOverlay</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <RepoDir>$(MSBuildThisFileDirectory)..\..\</RepoDir>
+    <OutDir>$(MSBuildThisFileDirectory)bin\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)obj\$(Configuration)\</IntDir>
+    <TargetName>OptiFpsOverlay</TargetName>
+    <TargetExt>.asi</TargetExt>
+    <LinkIncremental>false</LinkIncremental>
+    <IncludePath>$(MSBuildThisFileDirectory)shim;$(MSBuildThisFileDirectory)src;$(RepoDir)OptiScaler;$(RepoDir)OptiScaler\include;$(RepoDir)OptiScaler\menu;$(RepoDir)external\nvapi;$(RepoDir)external\freetype;$(IncludePath)</IncludePath>
+    <LibraryPath>$(RepoDir)OptiScaler\library\detours;$(RepoDir)external\freetype;$(LibraryPath)</LibraryPath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <Optimization>MaxSpeed</Optimization>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_USRDLL;_UNICODE;UNICODE;_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>detours.lib;freetype.lib;d3d11.lib;d3d12.lib;dxgi.lib;dxguid.lib;d3dcompiler.lib;dwmapi.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions>/ignore:4099 %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\AsiLog.cpp" />
+    <ClCompile Include="src\Backends.cpp" />
+    <ClCompile Include="src\Main.cpp" />
+    <ClCompile Include="src\OverlayConfig.cpp" />
+    <ClCompile Include="src\OverlayRender.cpp" />
+    <ClCompile Include="src\OverlaySettingsUi.cpp" />
+    <ClCompile Include="..\..\OptiScaler\include\imgui\imgui.cpp" />
+    <ClCompile Include="..\..\OptiScaler\include\imgui\imgui_demo.cpp" />
+    <ClCompile Include="..\..\OptiScaler\include\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\..\OptiScaler\include\imgui\imgui_tables.cpp" />
+    <ClCompile Include="..\..\OptiScaler\include\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="..\..\OptiScaler\include\imgui\imgui_impl_dx11.cpp" />
+    <ClCompile Include="..\..\OptiScaler\include\imgui\imgui_impl_dx12.cpp" />
+    <ClCompile Include="..\..\OptiScaler\include\imgui\imgui_impl_win32.cpp" />
+    <ClCompile Include="..\..\OptiScaler\include\imgui\misc\freetype\imgui_freetype.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\AsiLog.h" />
+    <ClInclude Include="src\Backends.h" />
+    <ClInclude Include="src\OverlayConfig.h" />
+    <ClInclude Include="src\OverlayRender.h" />
+    <ClInclude Include="src\OverlaySettingsUi.h" />
+    <ClInclude Include="src\OverlayStats.h" />
+    <ClInclude Include="shim\pch.h" />
+    <ClInclude Include="shim\State.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
