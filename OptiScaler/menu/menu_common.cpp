@@ -3500,10 +3500,14 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
             }
 
             std::vector<OverlayLine> lines;
+            std::vector<int> lineRows;
             for (auto row : OverlayRowOrder())
             {
                 if (rows[row].has_value())
+                {
                     lines.push_back(std::move(rows[row].value()));
+                    lineRows.push_back(row);
+                }
             }
 
             // Labels and values are scaled from the overlay's font size
@@ -3607,6 +3611,28 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
 
             for (auto& line : lines)
                 measureLine(line);
+
+            // A row keeps its widest width until it has been narrower for a while, so values that change length
+            // (N/A, clocks, a latency that comes and goes) don't resize and move the overlay every update
+            constexpr double rowShrinkDelayMs = 5000.0;
+            static std::array<float, OverlayRow_COUNT> rowWidths {};
+            static std::array<double, OverlayRow_COUNT> rowWidestAt {};
+
+            for (size_t i = 0; i < lines.size(); i++)
+            {
+                const int row = lineRows[i];
+                auto& width = lines[i].size.x;
+
+                if (width >= rowWidths[row] || now - rowWidestAt[row] > rowShrinkDelayMs)
+                {
+                    rowWidths[row] = width;
+                    rowWidestAt[row] = now;
+                }
+                else
+                {
+                    width = rowWidths[row];
+                }
+            }
 
             // On whole pixels, the shadows of a line under all its text so they don't cover the next part
             auto drawText = [&](ImDrawList* drawList, float px, ImVec2 pos, ImU32 color, const char* text,
