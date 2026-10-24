@@ -166,7 +166,10 @@ void Scan(void* device)
     std::error_code error;
 
     if (!std::filesystem::is_directory(folder, error))
+    {
+        LOG_INFO(L"No extra upscaler dlls, {} doesn't exist", folder.wstring());
         return;
+    }
 
     LOG_INFO(L"Looking for upscaler dlls in {}", folder.wstring());
 

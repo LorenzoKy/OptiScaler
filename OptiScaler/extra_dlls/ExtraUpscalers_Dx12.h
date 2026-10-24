@@ -3,13 +3,13 @@
 
 #include <ffx_api.h>
 
-// More DX12 FFX upscaler dlls from the "Extra dlls" folder next to OptiScaler, also in its subfolders: FFX SDK
+// More DX12 FFX upscaler dlls from the "Extra dlls" folder in OptiDllPath, also in its subfolders: FFX SDK
 // upscaler dlls (amd_fidelityfx_upscaler_dx12.dll), FFX loaders (amd_fidelityfx_dx12.dll) and copies of the driver dll
 // (amdxcffx64.dll). Each of their upscalers is listed next to the default ones in the FSR version list of the menu,
 // a version that's already listed is skipped. Contexts created with one of them stay with its dll.
 namespace ExtraUpscalersDx12
 {
-// The folder's name next to OptiScaler
+// The folder's name in OptiDllPath, .\OptiScaler by default
 inline constexpr const wchar_t* FolderName = L"Extra dlls";
 
 // Loads the dlls on the first call and adds their upscalers that ids doesn't have
