@@ -1,0 +1,24 @@
+name: Build FPS overlay ASI test
+on:
+  push:
+    branches: [ "ci/build-fps-overlay-asi" ]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build Release x64
+        run: msbuild asi/FpsOverlay/FpsOverlay.vcxproj /m /p:Configuration=Release /p:Platform=x64 /verbosity:minimal
+      - name: Upload ASI
+        uses: actions/upload-artifact@v4
+        with:
+          name: OptiFpsOverlay-asi
+          path: |
+            asi/FpsOverlay/bin/Release/OptiFpsOverlay.asi
+            asi/FpsOverlay/bin/Release/OptiFpsOverlay.pdb
+          if-no-files-found: error
