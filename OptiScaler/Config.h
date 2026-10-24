@@ -176,8 +176,18 @@ enum FpsOverlay : uint32_t
     FpsOverlay_DetailedGraph,
     FpsOverlay_Full,
     FpsOverlay_FullGraph,
-    FpsOverlay_ReflexTimings,
+    FpsOverlay_LowLatencyTimings,
+    FpsOverlay_Custom, // FpsOverlayRows and FpsOverlayFpsRow
     FpsOverlay_COUNT,
+};
+
+// What the FPS row shows with the FPS
+enum FpsOverlayFpsRow : uint32_t
+{
+    FpsOverlayFpsRow_JustFps,   // Only the number
+    FpsOverlayFpsRow_FrameTime, // The API, frame time, frame generation and upscaler
+    FpsOverlayFpsRow_Average,   // The API, average FPS, frame generation and upscaler
+    FpsOverlayFpsRow_COUNT,
 };
 
 // Output scaling downscaler
@@ -374,15 +384,17 @@ class Config
     CustomOptional<FpsOverlayPos> FpsOverlayPosition { FpsOverlayPos_TopLeft };
     /// 0 Only FPS, 1 +Avg FPS & Upscaler info 2 +Frame Time,
     /// 3 +Upscaler Time, 4 +Frame Time Graph, 5 +Upscaler Time Graph
-    /// 6 +Reflex timings
-    CustomOptional<FpsOverlay> FpsOverlayType { FpsOverlay_JustFPS };
+    /// 6 +Low latency timings, 7 Custom rows
+    CustomOptional<FpsOverlay> FpsOverlayType { FpsOverlay_FullGraph };
     CustomOptional<int> FpsShortcutKey { VK_PRIOR };
     CustomOptional<int> FpsCycleShortcutKey { VK_NEXT };
     CustomOptional<bool> FpsOverlayHorizontal { false };
     CustomOptional<bool> FpsOverlayShowRatio { false };
     CustomOptional<bool> FpsOverlayCompactLabels { false };
-    // Comma separated row keys: fps, upscale, frametime, upscaler. No value means that order
-    CustomOptional<std::string, NoDefault> FpsOverlayRowOrder;
+    // Rows of the Custom overlay type in their order, comma separated keys, hidden ones start with -.
+    // No value means the default overlay type's rows
+    CustomOptional<std::string, NoDefault> FpsOverlayRows;
+    CustomOptional<FpsOverlayFpsRow> FpsOverlayFpsRowType { FpsOverlayFpsRow_Average }; // Of the Custom type
     CustomOptional<float, NoDefault> FpsOverlayRowSpacing; // No value means the default spacing
     // Milliseconds the values that change every frame are kept, 0 updates them every frame
     CustomOptional<float> FpsOverlayUpdateInterval { 0.0f };
@@ -400,15 +412,15 @@ class Config
     CustomOptional<float> FpsOverlayLabelScale { 1.0f };
     CustomOptional<float> FpsOverlayValueScale { 1.0f };
     // 0xRRGGBB, used when the overlays don't use the theme colors
-    CustomOptional<uint32_t> FpsOverlayLabelColor { 0xFFFFFF };
+    CustomOptional<uint32_t> FpsOverlayLabelColor { 0xD9D9D9 };
     CustomOptional<uint32_t> FpsOverlayValueColor { 0xFFFFFF };
     CustomOptional<uint32_t> FpsOverlayGraphColor { 0x00FF00 };
     CustomOptional<uint32_t> FpsOverlayBGColor { 0x000000 };
-    CustomOptional<FpsOverlayShadow> FpsOverlayShadowType { FpsOverlayShadow_Off };
+    CustomOptional<FpsOverlayShadow> FpsOverlayShadowType { FpsOverlayShadow_Shadow };
     CustomOptional<float> FpsOverlayShadowStrength { 0.5f };
     CustomOptional<uint32_t> FpsOverlayShadowColor { 0x000000 };
-    CustomOptional<float, NoDefault> FpsOverlayRounding; // No value means same as MenuRounding
-    CustomOptional<float> MenuRounding { 2.0f };         // Window corner radius, 0 is square
+    CustomOptional<float> FpsOverlayRounding { 4.0f }; // Corner radius, 0 is square
+    CustomOptional<float> MenuRounding { 2.0f };       // Window corner radius, 0 is square
     CustomOptional<bool> UseHQFont { true };
     CustomOptional<bool> DisableSplash { false };
     CustomOptional<float> FontSize { 14.0f };

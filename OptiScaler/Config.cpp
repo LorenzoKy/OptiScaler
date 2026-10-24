@@ -886,7 +886,8 @@ static const char* overlayIniKeys[] = {
     "FpsOverlayHorizontal",
     "FpsOverlayShowRatio",
     "FpsOverlayCompactLabels",
-    "FpsOverlayRowOrder",
+    "FpsOverlayRows",
+    "FpsOverlayFpsRow",
     "FpsOverlayRowSpacing",
     "FpsOverlayUpdateInterval",
     "FpsOverlayAlpha",
@@ -939,7 +940,9 @@ void Config::ReadOverlaySettings(bool assign)
     apply(FpsOverlayHorizontal, readBool("Menu", "FpsOverlayHorizontal"));
     apply(FpsOverlayShowRatio, readBool("Menu", "FpsOverlayShowRatio"));
     apply(FpsOverlayCompactLabels, readBool("Menu", "FpsOverlayCompactLabels"));
-    apply(FpsOverlayRowOrder, readString("Menu", "FpsOverlayRowOrder", true));
+    apply(FpsOverlayRows, readString("Menu", "FpsOverlayRows", true));
+    apply(FpsOverlayFpsRowType, readIndex("FpsOverlayFpsRow", FpsOverlayFpsRow_COUNT)
+                                    .transform([](uint32_t value) { return (FpsOverlayFpsRow) value; }));
     apply(FpsOverlayRowSpacing, readClamped("FpsOverlayRowSpacing", 0.0f, 32.0f));
     apply(FpsOverlayUpdateInterval, readClamped("FpsOverlayUpdateInterval", 0.0f, 1000.0f));
     apply(FpsOverlayAlpha, readClamped("FpsOverlayAlpha", 0.0f, 1.0f));
@@ -972,7 +975,8 @@ void Config::WriteOverlaySettings()
     ini.SetValue("Menu", "FpsOverlayHorizontal", GetBoolValue(FpsOverlayHorizontal.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayShowRatio", GetBoolValue(FpsOverlayShowRatio.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayCompactLabels", GetBoolValue(FpsOverlayCompactLabels.value_for_config()).c_str());
-    ini.SetValue("Menu", "FpsOverlayRowOrder", FpsOverlayRowOrder.value_for_config_or("auto").c_str());
+    ini.SetValue("Menu", "FpsOverlayRows", FpsOverlayRows.value_for_config_or("auto").c_str());
+    ini.SetValue("Menu", "FpsOverlayFpsRow", GetIntValue(FpsOverlayFpsRowType.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayRowSpacing", GetFloatValue(FpsOverlayRowSpacing.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayUpdateInterval",
                  GetFloatValue(FpsOverlayUpdateInterval.value_for_config()).c_str());
