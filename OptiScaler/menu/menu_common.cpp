@@ -5316,6 +5316,12 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
         (streamlineVersion == feature_version { 0, 0, 0 } || streamlineVersion > feature_version { 2, 0, 1 });
     inputOptions[nvngxInputIndex].set_disabled(nukemsUnsupportedApi, "Unsupported API");
 
+    // XeFG on Vulkan goes through D3D12, Vulkan=false in [XeFG] turns it off
+    auto constexpr xefgOutputIndex = (uint32_t) FGOutput::XeFG;
+    outputOptions[xefgOutputIndex].set_disabled(state.swapchainApi == API::Vulkan &&
+                                                    !config->FGXeFGVulkan.value_or_default(),
+                                                "Off in OptiScaler.ini ([XeFG] Vulkan)");
+
     // Unsupported FG input selected
     const auto currentInputIndex = (uint32_t) state.activeFgInput;
     if (config->FGInput != FGInput::NoFG && inputOptions.size() > currentInputIndex &&
