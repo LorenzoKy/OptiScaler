@@ -17,6 +17,7 @@
 #include <magic_enum.hpp>
 #include "detours/detours.h"
 #include <shaders/reproject/mouseInputs/InputCollection.h>
+#include <low_latency/input/input_common.h>
 
 #include <intrin.h>
 #pragma intrinsic(_ReturnAddress)
@@ -1768,6 +1769,10 @@ sl::Result StreamlineHooks::hkslPCLSetMarker(sl::PCLMarker marker, const sl::Fra
 
     if (marker == sl::PCLMarker::eSimulationStart)
         InputCollection::getInstance().startCollectingForFrame(frame);
+
+    // The frame the game tagged with the FPS overlay's ping
+    if (marker == sl::PCLMarker::ePCLatencyPing)
+        InputCommon::note_latency_ping(static_cast<uint32_t>(frame));
 
     if (State::Instance().activeFgInput == FGInput::DLSSG)
     {
