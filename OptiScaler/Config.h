@@ -415,6 +415,8 @@ class Config
     CustomOptional<bool> FpsOverlayShowCommitRam { false };
     CustomOptional<bool> FpsOverlayShowHardwareNames { false };
     CustomOptional<bool> FpsOverlayShowUsage { false };        // CPU and GPU usage on their rows
+    CustomOptional<bool> FpsOverlayShowGpuHotspot { false };   // The GPU's hottest sensor on its row
+    CustomOptional<bool> FpsOverlayShowCpuHotspot { false };   // The CPU's hottest core or CCD on its row
     CustomOptional<bool> FpsOverlayShowClock { false };        // Date and time row
     CustomOptional<bool> FpsOverlayShowSessionTimer { false }; // Time since OptiScaler started, on the FPS row
     CustomOptional<bool> FpsOverlayCompactLabels { false };
