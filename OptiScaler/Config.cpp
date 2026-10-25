@@ -1299,6 +1299,15 @@ bool Config::ImportOverlaySettings(std::string_view code)
         return false;
 
     auto text = UnpackOverlayValues(data.value());
+
+    // OptiScaler Venom v0.2 beta 1's codes are the Key=Value lines themselves, a packed code has bytes that aren't text
+    if (!text.has_value() && data->find('=') != std::string::npos &&
+        std::all_of(data->begin(), data->end(), [](char c) { return c == '\n' || (c >= 0x20 && c < 0x7F); }))
+    {
+        text = data.value();
+        std::replace(text->begin(), text->end(), '\n', ';');
+    }
+
     if (!text.has_value())
         return false;
 
