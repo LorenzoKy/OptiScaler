@@ -277,7 +277,8 @@ bool VkwDx12SC::Wanted()
 
     // Every FG input, the Nvngx one has no FG output
     return state.activeFgOutput == FGOutput::XeFG && state.activeFgInput != FGInput::NoFG &&
-           state.activeFgInput != FGInput::NvngxFG && !state.vulkanSkipHooks;
+           state.activeFgInput != FGInput::NvngxFG && !state.vulkanSkipHooks &&
+           Config::Instance()->FGXeFGVulkan.value_or_default();
 }
 
 bool VkwDx12SC::CanShare(VkFormat format) { return SharedDxgiFormat(format) != DXGI_FORMAT_UNKNOWN; }
@@ -1138,6 +1139,9 @@ void VkwDx12SC::Destroy(const VkAllocationCallbacks* pAllocator)
     WaitForIdle();
     DestroyPresentImages();
 
+    // The FG inputs' shared textures go with the swapchain that shares them
+    VkwDx12Inputs::Shutdown();
+
     if (_swapchain != VK_NULL_HANDLE)
         _functions.DestroySwapchain(_device, _swapchain, pAllocator);
 
@@ -1206,9 +1210,26 @@ VkResult VkwDx12SC::Present(VkQueue queue, const VkPresentInfoKHR* pPresentInfo)
             queueFamily = it->second;
     }
 
-    if (index >= _images.size() || queueFamily == UINT32_MAX || !PrepareCommandPool(queueFamily))
+    // The hidden window's present gives the image back to the game and runs the present's semaphore waits, also when
+    // the frame can't reach the FG swapchain
+    PresentChain chain;
+    const void* presentNext = chain.WithoutPresentMode(pPresentInfo->pNext);
+
+    auto presentHidden = [&](uint32_t waitCount, const VkSemaphore* waitSemaphores)
+    {
+        VkPresentInfoKHR presentInfo = *pPresentInfo;
+        presentInfo.pNext = presentNext;
+        presentInfo.waitSemaphoreCount = waitCount;
+        presentInfo.pWaitSemaphores = waitSemaphores;
+
+        return _functions.QueuePresent(queue, &presentInfo);
+    };
+
+    if (index >= _images.size() || index >= _swapchainImages.size() || queueFamily == UINT32_MAX ||
+        !PrepareCommandPool(queueFamily))
     {
         LOG_ERROR("Can't present image {} from queue {:X}", index, (size_t) queue);
+        presentHidden(pPresentInfo->waitSemaphoreCount, pPresentInfo->pWaitSemaphores);
         return VK_ERROR_OUT_OF_DATE_KHR;
     }
 
@@ -1222,7 +1243,10 @@ VkResult VkwDx12SC::Present(VkQueue queue, const VkPresentInfoKHR* pPresentInfo)
     }
 
     if (!RecordCopy(presentImage, _swapchainImages[index]))
+    {
+        presentHidden(pPresentInfo->waitSemaphoreCount, pPresentInfo->pWaitSemaphores);
         return VK_ERROR_OUT_OF_DATE_KHR;
+    }
 
     // Waits for the game's frame and the last D3D12 copy from the shared texture
     std::vector<VkSemaphore> waits(pPresentInfo->pWaitSemaphores,
@@ -1256,14 +1280,18 @@ VkResult VkwDx12SC::Present(VkQueue queue, const VkPresentInfoKHR* pPresentInfo)
     if (vkResult != VK_SUCCESS)
     {
         LOG_ERROR("vkQueueSubmit: {}", (int) vkResult);
+        presentHidden(pPresentInfo->waitSemaphoreCount, pPresentInfo->pWaitSemaphores);
         return vkResult;
     }
 
     presentImage.submitted = true;
 
-    // D3D12 takes the frame once Vulkan copied it
+    // D3D12 takes the frame once Vulkan copied it, a frame it can't take is dropped
     if (FAILED(_dx12Queue->Wait(_vkDoneFence, _vkDoneValue)) || !CopyToFGBackBuffer(presentImage))
-        return VK_ERROR_DEVICE_LOST;
+    {
+        LOG_ERROR("Can't copy the frame to the FG swapchain, dropped");
+        return presentHidden(1, &presentImage.presentSemaphore);
+    }
 
     auto result = _fgSwapChain->Present(SyncInterval(), PresentFlags());
 
@@ -1284,6 +1312,8 @@ VkResult VkwDx12SC::Present(VkQueue queue, const VkPresentInfoKHR* pPresentInfo)
         }
     }
 
+    vkResult = presentHidden(1, &presentImage.presentSemaphore);
+
     if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET || result == DXGI_ERROR_DEVICE_HUNG)
     {
         LOG_ERROR("FG Present: {:X}", (UINT) result);
@@ -1292,16 +1322,6 @@ VkResult VkwDx12SC::Present(VkQueue queue, const VkPresentInfoKHR* pPresentInfo)
 
     if (FAILED(result))
         LOG_WARN("FG Present: {:X}", (UINT) result);
-
-    // The hidden window's present gives the image back to the game
-    PresentChain chain;
-
-    VkPresentInfoKHR presentInfo = *pPresentInfo;
-    presentInfo.pNext = chain.WithoutPresentMode(pPresentInfo->pNext);
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &presentImage.presentSemaphore;
-
-    vkResult = _functions.QueuePresent(queue, &presentInfo);
 
     // The hidden window doesn't follow the game's, its new size is for the game to pick up
     RECT rect {};
