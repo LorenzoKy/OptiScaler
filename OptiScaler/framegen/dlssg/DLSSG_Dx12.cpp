@@ -9,6 +9,7 @@
 #include <resource_tracking/ResTrack_dx12.h>
 
 #include <hooks/DxgiFactory_Hooks.h>
+#include <proxies/KernelBase_Proxy.h>
 
 #include <misc/DeferredRelease.h>
 #include <magic_enum.hpp>
@@ -826,6 +827,13 @@ bool DLSSG_Dx12::SetResource(Dx12Resource* inputResource)
 }
 
 void DLSSG_Dx12::SetCommandQueue(FG_ResourceType type, ID3D12CommandQueue* queue) { _gameCommandQueue = queue; }
+
+// Streamline's DLSSG plugin and NVIDIA's frame generation dll, the game's or Opti's
+std::vector<HMODULE> DLSSG_Dx12::GpuWorkModules()
+{
+    return { KernelBaseProxy::GetModuleHandleW_()(L"sl.dlss_g.dll"),
+             KernelBaseProxy::GetModuleHandleW_()(L"nvngx_dlssg.dll"), State::Instance().optiDLSSG };
+}
 
 bool DLSSG_Dx12::ReleaseSwapchain(HWND hwnd)
 {
