@@ -17,6 +17,7 @@
 
 #include <misc/IdentifyGpu.h>
 #include <hooks/Reflex_Hooks.h>
+#include <gpu_time/FGGpuTime_Dx12.h>
 #include <low_latency/input/input_common.h>
 #include <menu/menu_overlay_dx.h>
 
@@ -1245,6 +1246,38 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
         }
     }
 
+    // The frame generation's GPU time per real frame, timed only while the overlay shows it
+    if (willPresent)
+    {
+        const bool timeFG = fg != nullptr && fg->IsActive() && !fg->IsPaused() && config->ShowFps.value_or_default() &&
+                            State::Instance().overlayShowsFGTime;
+
+        static bool lastTimeFG = false;
+        static double modulesSetAt = 0.0;
+        const auto now = Util::MillisecondsNow();
+
+        // Its libraries can load after it starts
+        if (timeFG != lastTimeFG || (timeFG && now - modulesSetAt > 1000.0))
+        {
+            if (timeFG)
+                FGGpuTime_Dx12::Hook(state.currentFG->GetCommandQueue());
+
+            FGGpuTime_Dx12::SetModules(timeFG ? fg->GpuWorkModules() : std::vector<HMODULE> {});
+            lastTimeFG = timeFG;
+            modulesSetAt = now;
+        }
+
+        if (timeFG)
+        {
+            const double fgTime = FGGpuTime_Dx12::Collect();
+
+            State::Instance().frameTimeMutex.lock();
+            State::Instance().fgTimes.push_back(fgTime);
+            State::Instance().fgTimes.pop_front();
+            State::Instance().frameTimeMutex.unlock();
+        }
+    }
+
     bool mutexUsed = false;
     if (willPresent && fg != nullptr && fg->IsActive() && !fg->IsPaused() &&
         config->FGUseMutexForSwapchain.value_or_default() && fg->Mutex.getOwner() != 2)
@@ -1344,6 +1377,9 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
         frameMultiplier = fg->IsActive() && !fg->IsPaused() ? fg->GetInterpolatedFrameCount() + 1 : 1;
         InputCommon::fg_game_present(gameQueue, false, frameMultiplier);
 
+        // For the overlay's PC latency: the frame generation's presents of this frame come later
+        InputCommon::note_fg_game_present(frameMultiplier);
+
         if (state.activeFgOutput == FGOutput::XeFG)
         {
             xefgContext = fg->SwapchainContext();
@@ -1370,6 +1406,9 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
             XEFG_SWAPCHAIN_RESULT_SUCCESS)
         {
             InputCommon::xefg_present_status(xefgFrameId, status.framesPresented);
+
+            // For the overlay's PC latency, XeFG's own count when it couldn't generate a frame
+            InputCommon::fg_game_presents(status.framesPresented);
         }
     }
 
@@ -1409,7 +1448,11 @@ HRESULT FGHooks::FGPresent(IDXGISwapChain* This, UINT SyncInterval, UINT Flags,
     }
 
     if (willPresent)
+    {
         state.lastFGPresentMs = Util::MillisecondsNow() - presentStart;
+
+        InputCommon::note_game_present_ms(state.lastFGPresentMs, true);
+    }
 
     if ((config->SimulateWaitableObject.value_or_default() ||
          (state.gameEngine == GameEngineType::Unity && state.activeFgOutput == FGOutput::XeFG)) &&

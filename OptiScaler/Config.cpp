@@ -912,6 +912,47 @@ static const OverlayIniKey overlayIniKeys[] = {
     { "FpsOverlayShadowColor", OverlayValueType::Color }, { "FpsOverlayRounding", OverlayValueType::Float },
 };
 
+// The keys added to upstream's, in codes from venomKeyBase on so the keys upstream adds later don't take their places
+static constexpr size_t venomKeyBase = 0x80;
+static const OverlayIniKey venomOverlayIniKeys[] = {
+    { "FpsOverlayShowLows", OverlayValueType::Bool },          { "FpsOverlayShowLatency", OverlayValueType::Bool },
+    { "FpsOverlayLatencyType", OverlayValueType::Index },      { "FpsOverlayShowFGTime", OverlayValueType::Bool },
+    { "FpsOverlayShowFpsCost", OverlayValueType::Bool },       { "FpsOverlayShowPointOneLow", OverlayValueType::Bool },
+    { "FpsOverlayShowBottleneck", OverlayValueType::Bool },    { "FpsOverlayShowVram", OverlayValueType::Bool },
+    { "FpsOverlayShowGpu", OverlayValueType::Bool },           { "FpsOverlayShowCpu", OverlayValueType::Bool },
+    { "FpsOverlayShowRefreshRate", OverlayValueType::Bool },   { "FpsOverlayShowRam", OverlayValueType::Bool },
+    { "FpsOverlayShowGameRam", OverlayValueType::Bool },       { "FpsOverlayShowCommitRam", OverlayValueType::Bool },
+    { "FpsOverlayShowHardwareNames", OverlayValueType::Bool }, { "FpsOverlayShowUsage", OverlayValueType::Bool },
+    { "FpsOverlayShowClock", OverlayValueType::Bool },         { "FpsOverlayShowSessionTimer", OverlayValueType::Bool },
+};
+static_assert(std::size(overlayIniKeys) <= venomKeyBase && venomKeyBase + std::size(venomOverlayIniKeys) <= 0x100);
+
+// A key by its place in a code, nullptr for a place without one
+static const OverlayIniKey* OverlayKeyAt(size_t index)
+{
+    if (index < std::size(overlayIniKeys))
+        return &overlayIniKeys[index];
+
+    if (index >= venomKeyBase && index - venomKeyBase < std::size(venomOverlayIniKeys))
+        return &venomOverlayIniKeys[index - venomKeyBase];
+
+    return nullptr;
+}
+
+// Every key's place in a code
+static std::vector<size_t> OverlayKeyIndexes()
+{
+    std::vector<size_t> indexes;
+
+    for (size_t i = 0; i < std::size(overlayIniKeys); i++)
+        indexes.push_back(i);
+
+    for (size_t i = 0; i < std::size(venomOverlayIniKeys); i++)
+        indexes.push_back(venomKeyBase + i);
+
+    return indexes;
+}
+
 void Config::ReadOverlaySettings(bool assign)
 {
     // Loading the ini fills only what isn't set yet, applying a code replaces the values
@@ -939,6 +980,25 @@ void Config::ReadOverlaySettings(bool assign)
           readIndex("FpsOverlayType", FpsOverlay_COUNT).transform([](uint32_t value) { return (FpsOverlay) value; }));
     apply(FpsOverlayHorizontal, readBool("Menu", "FpsOverlayHorizontal"));
     apply(FpsOverlayShowRatio, readBool("Menu", "FpsOverlayShowRatio"));
+    apply(FpsOverlayShowLows, readBool("Menu", "FpsOverlayShowLows"));
+    apply(FpsOverlayShowLatency, readBool("Menu", "FpsOverlayShowLatency"));
+    apply(FpsOverlayLatencyType, readIndex("FpsOverlayLatencyType", FpsOverlayLatency_COUNT)
+                                     .transform([](uint32_t value) { return (FpsOverlayLatency) value; }));
+    apply(FpsOverlayShowFGTime, readBool("Menu", "FpsOverlayShowFGTime"));
+    apply(FpsOverlayShowFpsCost, readBool("Menu", "FpsOverlayShowFpsCost"));
+    apply(FpsOverlayShowPointOneLow, readBool("Menu", "FpsOverlayShowPointOneLow"));
+    apply(FpsOverlayShowBottleneck, readBool("Menu", "FpsOverlayShowBottleneck"));
+    apply(FpsOverlayShowVram, readBool("Menu", "FpsOverlayShowVram"));
+    apply(FpsOverlayShowGpu, readBool("Menu", "FpsOverlayShowGpu"));
+    apply(FpsOverlayShowCpu, readBool("Menu", "FpsOverlayShowCpu"));
+    apply(FpsOverlayShowRefreshRate, readBool("Menu", "FpsOverlayShowRefreshRate"));
+    apply(FpsOverlayShowRam, readBool("Menu", "FpsOverlayShowRam"));
+    apply(FpsOverlayShowGameRam, readBool("Menu", "FpsOverlayShowGameRam"));
+    apply(FpsOverlayShowCommitRam, readBool("Menu", "FpsOverlayShowCommitRam"));
+    apply(FpsOverlayShowHardwareNames, readBool("Menu", "FpsOverlayShowHardwareNames"));
+    apply(FpsOverlayShowUsage, readBool("Menu", "FpsOverlayShowUsage"));
+    apply(FpsOverlayShowClock, readBool("Menu", "FpsOverlayShowClock"));
+    apply(FpsOverlayShowSessionTimer, readBool("Menu", "FpsOverlayShowSessionTimer"));
     apply(FpsOverlayCompactLabels, readBool("Menu", "FpsOverlayCompactLabels"));
     apply(FpsOverlayRows, readString("Menu", "FpsOverlayRows", true));
     apply(FpsOverlayFpsRowType, readIndex("FpsOverlayFpsRow", FpsOverlayFpsRow_COUNT)
@@ -973,6 +1033,28 @@ void Config::WriteOverlaySettings()
     ini.SetValue("Menu", "FpsOverlayType", GetIntValue(FpsOverlayType.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayHorizontal", GetBoolValue(FpsOverlayHorizontal.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayShowRatio", GetBoolValue(FpsOverlayShowRatio.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowLows", GetBoolValue(FpsOverlayShowLows.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowLatency", GetBoolValue(FpsOverlayShowLatency.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayLatencyType", GetIntValue(FpsOverlayLatencyType.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowFGTime", GetBoolValue(FpsOverlayShowFGTime.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowFpsCost", GetBoolValue(FpsOverlayShowFpsCost.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowPointOneLow",
+                 GetBoolValue(FpsOverlayShowPointOneLow.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowBottleneck", GetBoolValue(FpsOverlayShowBottleneck.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowVram", GetBoolValue(FpsOverlayShowVram.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowGpu", GetBoolValue(FpsOverlayShowGpu.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowCpu", GetBoolValue(FpsOverlayShowCpu.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowRefreshRate",
+                 GetBoolValue(FpsOverlayShowRefreshRate.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowRam", GetBoolValue(FpsOverlayShowRam.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowGameRam", GetBoolValue(FpsOverlayShowGameRam.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowCommitRam", GetBoolValue(FpsOverlayShowCommitRam.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowHardwareNames",
+                 GetBoolValue(FpsOverlayShowHardwareNames.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowUsage", GetBoolValue(FpsOverlayShowUsage.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowClock", GetBoolValue(FpsOverlayShowClock.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowSessionTimer",
+                 GetBoolValue(FpsOverlayShowSessionTimer.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayCompactLabels", GetBoolValue(FpsOverlayCompactLabels.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayRows", FpsOverlayRows.value_for_config_or("auto").c_str());
     ini.SetValue("Menu", "FpsOverlayFpsRow", GetIntValue(FpsOverlayFpsRowType.value_for_config()).c_str());
@@ -1116,10 +1198,11 @@ static std::optional<std::string> UnpackOverlayValues(std::string_view data)
         const auto index = static_cast<uint8_t>(data.front());
         data.remove_prefix(1);
 
-        if (index >= std::size(overlayIniKeys))
+        const auto* keyAt = OverlayKeyAt(index);
+        if (keyAt == nullptr)
             return std::nullopt;
 
-        const auto& key = overlayIniKeys[index];
+        const auto& key = *keyAt;
 
         size_t size = 1;
         if (key.type == OverlayValueType::Color)
@@ -1178,15 +1261,16 @@ std::string Config::ExportOverlaySettings()
 
     std::string data;
 
-    for (size_t i = 0; i < std::size(overlayIniKeys); i++)
+    for (const size_t i : OverlayKeyIndexes())
     {
-        const char* value = ini.GetValue("Menu", overlayIniKeys[i].name, "auto");
+        const auto* key = OverlayKeyAt(i);
+        const char* value = ini.GetValue("Menu", key->name, "auto");
 
         if (value == nullptr || lstrcmpiA(value, "auto") == 0)
             continue;
 
         data += static_cast<char>(i);
-        PackOverlayValue(data, overlayIniKeys[i].type, value);
+        PackOverlayValue(data, key->type, value);
     }
 
     return std::string(overlayCodePrefix) + Base64Encode(data);
@@ -1236,11 +1320,13 @@ bool Config::ApplyOverlaySettings(std::string_view text)
         if (name == OverlayCodeKey("FpsOverlayFont") && value.find_first_of("\\/:") != std::string::npos)
             continue;
 
-        for (const auto& key : overlayIniKeys)
+        for (const size_t i : OverlayKeyIndexes())
         {
-            if (OverlayCodeKey(key.name) == name)
+            const auto* key = OverlayKeyAt(i);
+
+            if (OverlayCodeKey(key->name) == name)
             {
-                values.emplace_back(key.name, std::move(value));
+                values.emplace_back(key->name, std::move(value));
                 break;
             }
         }
@@ -1251,8 +1337,8 @@ bool Config::ApplyOverlaySettings(std::string_view text)
         return false;
 
     // What the code doesn't list goes back to its default
-    for (const auto& key : overlayIniKeys)
-        ini.SetValue("Menu", key.name, "auto");
+    for (const size_t i : OverlayKeyIndexes())
+        ini.SetValue("Menu", OverlayKeyAt(i)->name, "auto");
 
     for (const auto& [key, value] : values)
         ini.SetValue("Menu", key, value.c_str());
