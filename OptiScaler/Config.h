@@ -421,6 +421,7 @@ class Config
     CustomOptional<bool> FpsOverlayShowCpuHotspot { false };   // The CPU's hottest core or CCD on its row
     CustomOptional<bool> FpsOverlayShowClock { false };        // Date and time row
     CustomOptional<bool> FpsOverlayShowSessionTimer { false }; // Time since OptiScaler started, on the FPS row
+    CustomOptional<bool> FpsOverlayShowUpscalerName { true };  // Input -> upscaler and its version, on the FPS row
     CustomOptional<bool> FpsOverlayCompactLabels { false };
     CustomOptional<bool> FpsOverlayHideAverages { false };
     // Rows of the Custom overlay type in their order, comma separated keys, hidden ones start with -.

@@ -3261,7 +3261,7 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                 if (!fgText.empty())
                     line.Label(" (" + fgText + ")");
 
-                if (!featureText.empty())
+                if (!featureText.empty() && config->FpsOverlayShowUpscalerName.value_or_default())
                     line.Label(" | " + featureText);
 
                 // How long OptiScaler has been running
@@ -3453,6 +3453,16 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                 rows[OverlayRow_LowLatency] = OverlayLine();
                 rows[OverlayRow_LowLatency]->lowLatency = true;
             }
+            else if (rowShown[OverlayRow_LowLatency])
+            {
+                // The Reflex output has no timings yet, the others need the game's markers
+                rows[OverlayRow_LowLatency] =
+                    OverlayLine()
+                        .Label(L("Low Latency Timings: ", "LLT "))
+                        .Value("lowLatencyTimings", "N/A")
+                        .Label(InputCommon::active_output() == LowLatencyMode::Reflex ? " (not with Reflex output)"
+                                                                                      : " (no markers)");
+            }
 
             // Per real frame and per generated frame, only the D3D12 frame generation is timed
             if (interpolatedFrameCount != 0 && state.currentFG != nullptr)
@@ -3469,6 +3479,14 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
 
                 rows[OverlayRow_FGTime] = std::move(line);
                 rows[OverlayRow_FGTimeGraph] = graphRow("##FGTimeGraph", &gFGTimes, 20.0f);
+            }
+            else if (rowShown[OverlayRow_FGTime])
+            {
+                rows[OverlayRow_FGTime] = OverlayLine()
+                                              .Label(L("FG Time: ", "FGT "))
+                                              .Value("fgTime", "N/A")
+                                              .Label(generatedFrames != 0 ? " (not timed for this frame generation)"
+                                                                          : " (frame generation off)");
             }
 
             auto colorOf = [](float r, float g, float b)
@@ -9137,6 +9155,9 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
 
             optionCheckbox("Session Timer", config->FpsOverlayShowSessionTimer,
                            "Adds how long OptiScaler has been running to the FPS row");
+
+            optionCheckbox("Upscaler Name", config->FpsOverlayShowUpscalerName,
+                           "Shows the input and the upscaler with its version on the FPS row");
 
             const char* latencyTypes[] = { "PC Latency (Experimental)", "Render Latency", "Both" };
             int latencyType = config->FpsOverlayLatencyType.value_or_default();
