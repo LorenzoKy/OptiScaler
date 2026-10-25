@@ -125,5 +125,6 @@ class FSRFG_Dx12 : public virtual IFGFeature_Dx12
 
     // Inherited via IFGFeature_Dx12
     bool SetInterpolatedFrameCount(UINT interpolatedFrameCount) override;
+    std::vector<HMODULE> GpuWorkModules() override;
     // bool HasReprojection() override final { return true; };
 };
