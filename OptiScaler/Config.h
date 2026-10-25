@@ -409,7 +409,6 @@ class Config
     CustomOptional<bool> FpsOverlayShowVram { false };
     CustomOptional<bool> FpsOverlayShowGpu { false };
     CustomOptional<bool> FpsOverlayShowCpu { false };
-    CustomOptional<bool> FpsOverlayShowRefreshRate { false };
     CustomOptional<bool> FpsOverlayShowRam { false };
     CustomOptional<bool> FpsOverlayShowGameRam { true };
     CustomOptional<bool> FpsOverlayShowCommitRam { false };
@@ -419,7 +418,12 @@ class Config
     CustomOptional<bool> FpsOverlayShowCpuHotspot { false };   // The CPU's hottest core or CCD on its row
     CustomOptional<bool> FpsOverlayShowClock { false };        // Date and time row
     CustomOptional<bool> FpsOverlayShowSessionTimer { false }; // Time since OptiScaler started, on the FPS row
-    CustomOptional<bool> FpsOverlayShowUpscalerName { true };  // Input -> upscaler and its version, on the FPS row
+    CustomOptional<bool> FpsOverlayShowUpscalerName { true };  // Input -> upscaler and its version, Upscale or FPS row
+    // A graph row also needs its switch, on any overlay type
+    CustomOptional<bool> FpsOverlayShowFrameTimeGraph { true };
+    CustomOptional<bool> FpsOverlayShowUpscalerTimeGraph { true };
+    CustomOptional<bool> FpsOverlayShowFGTimeGraph { true };
+    CustomOptional<bool> FpsOverlayShowLatencyGraph { false };
     CustomOptional<bool> FpsOverlayCompactLabels { false };
     // Rows of the Custom overlay type in their order, comma separated keys, hidden ones start with -.
     // No value means the default overlay type's rows
