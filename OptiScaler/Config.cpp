@@ -924,6 +924,7 @@ static const OverlayIniKey venomOverlayIniKeys[] = {
     { "FpsOverlayShowGameRam", OverlayValueType::Bool },       { "FpsOverlayShowCommitRam", OverlayValueType::Bool },
     { "FpsOverlayShowHardwareNames", OverlayValueType::Bool }, { "FpsOverlayShowUsage", OverlayValueType::Bool },
     { "FpsOverlayShowClock", OverlayValueType::Bool },         { "FpsOverlayShowSessionTimer", OverlayValueType::Bool },
+    { "FpsOverlayShowGpuHotspot", OverlayValueType::Bool },    { "FpsOverlayShowCpuHotspot", OverlayValueType::Bool },
 };
 static_assert(std::size(overlayIniKeys) <= venomKeyBase && venomKeyBase + std::size(venomOverlayIniKeys) <= 0x100);
 
@@ -997,6 +998,8 @@ void Config::ReadOverlaySettings(bool assign)
     apply(FpsOverlayShowCommitRam, readBool("Menu", "FpsOverlayShowCommitRam"));
     apply(FpsOverlayShowHardwareNames, readBool("Menu", "FpsOverlayShowHardwareNames"));
     apply(FpsOverlayShowUsage, readBool("Menu", "FpsOverlayShowUsage"));
+    apply(FpsOverlayShowGpuHotspot, readBool("Menu", "FpsOverlayShowGpuHotspot"));
+    apply(FpsOverlayShowCpuHotspot, readBool("Menu", "FpsOverlayShowCpuHotspot"));
     apply(FpsOverlayShowClock, readBool("Menu", "FpsOverlayShowClock"));
     apply(FpsOverlayShowSessionTimer, readBool("Menu", "FpsOverlayShowSessionTimer"));
     apply(FpsOverlayCompactLabels, readBool("Menu", "FpsOverlayCompactLabels"));
@@ -1052,6 +1055,8 @@ void Config::WriteOverlaySettings()
     ini.SetValue("Menu", "FpsOverlayShowHardwareNames",
                  GetBoolValue(FpsOverlayShowHardwareNames.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayShowUsage", GetBoolValue(FpsOverlayShowUsage.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowGpuHotspot", GetBoolValue(FpsOverlayShowGpuHotspot.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowCpuHotspot", GetBoolValue(FpsOverlayShowCpuHotspot.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayShowClock", GetBoolValue(FpsOverlayShowClock.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayShowSessionTimer",
                  GetBoolValue(FpsOverlayShowSessionTimer.value_for_config()).c_str());
