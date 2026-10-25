@@ -500,13 +500,23 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         State::Instance().frameCount = _frameCounter;
     }
 
+    // GPU end of the frame for the overlay's PC latency, the present submits D3D11's signal
+    if (willPresent && isD3D11)
+        InputCommon::track_present_gpu_end(device);
+
     LOG_DEBUG("Calling original present");
 
     // swapchain present
+    const auto presentStartMs = Util::MillisecondsNow();
+
     if (pPresentParameters == nullptr)
         presentResult = pSwapChain->Present(SyncInterval, Flags);
     else
         presentResult = ((IDXGISwapChain1*) pSwapChain)->Present1(SyncInterval, Flags, pPresentParameters);
+
+    // How long the game waited in its present, for the overlay's bottleneck
+    if (willPresent)
+        InputCommon::note_game_present_ms(Util::MillisecondsNow() - presentStartMs, false);
 
     DeferredRelease::Process();
 
@@ -515,6 +525,10 @@ static HRESULT LocalPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         InputCommon::fg_output_present(fgPresentQueue, true, fgFrameMultiplier);
         fgPresentQueue->Release();
     }
+
+    // GPU end of the frame for the overlay's PC latency
+    if (willPresent && cq != nullptr)
+        InputCommon::track_present_gpu_end(cq);
 
     if (presentResult == S_OK)
     {

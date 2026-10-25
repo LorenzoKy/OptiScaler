@@ -160,6 +160,15 @@ enum FpsOverlayPos : uint32_t
     FpsOverlayPos_COUNT,
 };
 
+// PC latency up to the frame on screen, up to the end of its GPU work, or both
+enum FpsOverlayLatency : uint32_t
+{
+    FpsOverlayLatency_Display,
+    FpsOverlayLatency_Render,
+    FpsOverlayLatency_Both,
+    FpsOverlayLatency_COUNT,
+};
+
 enum FpsOverlayShadow : uint32_t
 {
     FpsOverlayShadow_Off,
@@ -392,6 +401,24 @@ class Config
     CustomOptional<int> FpsCycleShortcutKey { VK_NEXT };
     CustomOptional<bool> FpsOverlayHorizontal { false };
     CustomOptional<bool> FpsOverlayShowRatio { false };
+    CustomOptional<bool> FpsOverlayShowLows { false };
+    CustomOptional<bool> FpsOverlayShowLatency { false };
+    CustomOptional<FpsOverlayLatency> FpsOverlayLatencyType { FpsOverlayLatency_Display };
+    CustomOptional<bool> FpsOverlayShowFGTime { false };
+    CustomOptional<bool> FpsOverlayShowFpsCost { false };
+    CustomOptional<bool> FpsOverlayShowPointOneLow { false };
+    CustomOptional<bool> FpsOverlayShowBottleneck { false };
+    CustomOptional<bool> FpsOverlayShowVram { false };
+    CustomOptional<bool> FpsOverlayShowGpu { false };
+    CustomOptional<bool> FpsOverlayShowCpu { false };
+    CustomOptional<bool> FpsOverlayShowRefreshRate { false };
+    CustomOptional<bool> FpsOverlayShowRam { false };
+    CustomOptional<bool> FpsOverlayShowGameRam { true };
+    CustomOptional<bool> FpsOverlayShowCommitRam { false };
+    CustomOptional<bool> FpsOverlayShowHardwareNames { false };
+    CustomOptional<bool> FpsOverlayShowUsage { false };        // CPU and GPU usage on their rows
+    CustomOptional<bool> FpsOverlayShowClock { false };        // Date and time row
+    CustomOptional<bool> FpsOverlayShowSessionTimer { false }; // Time since OptiScaler started, on the FPS row
     CustomOptional<bool> FpsOverlayCompactLabels { false };
     CustomOptional<bool> FpsOverlayHideAverages { false };
     // Rows of the Custom overlay type in their order, comma separated keys, hidden ones start with -.
