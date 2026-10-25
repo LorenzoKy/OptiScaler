@@ -368,9 +368,10 @@ static const char* overlayRowTips[] = {
     "and its average. With VRR it follows the frames shown.",
     "VRAM the game uses and its budget, above it the game stutters.\n"
     "Plus the memory clock when the GPU reports it.",
-    "GPU temperature, power, voltage and clock, usage with CPU & GPU Usage",
-    "CPU temperature, power, voltage and clock, usage with CPU & GPU Usage.\n"
-    "Some need HWiNFO, Afterburner or Core Temp running.",
+    "GPU temperature, power, voltage and clock. Usage and hotspot are in Row Options.",
+    "CPU temperature, power, voltage and clock. Usage and hotspot are in Row Options.\n"
+    "On Windows the temperatures need HWiNFO (Shared Memory Support on), MSI Afterburner,\n"
+    "Core Temp or AMD Adrenalin running. On Linux they're read from the kernel's sensors.",
     "System RAM in use and total",
     "The date and time, in the format Windows uses",
 };
@@ -3691,6 +3692,7 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
             };
 
             const std::string hardwareSeparator = L(" | ", " ");
+            const std::string hotspotLabel = L("Hotspot ", "HS ");
 
             if (rowShown[OverlayRow_Gpu])
             {
@@ -3707,6 +3709,16 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
 
                 if (gpu.tempC.has_value())
                     row.Add(sep, "gpuTemp", StrFmt("%.0f C", gpu.tempC.value()), tempColor(gpu.tempC.value()));
+
+                if (config->FpsOverlayShowGpuHotspot.value_or_default() && gpu.hotspotC.has_value())
+                {
+                    if (row.hasAny)
+                        row.line.Label(sep);
+
+                    row.hasAny = true;
+                    row.line.Label(hotspotLabel)
+                        .Value("gpuHotspot", StrFmt("%.0f C", gpu.hotspotC.value()), tempColor(gpu.hotspotC.value()));
+                }
 
                 if (gpu.powerW.has_value())
                     row.Add(sep, "gpuPower", StrFmt("%.0f W", gpu.powerW.value()));
@@ -3748,6 +3760,16 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
 
                 if (cpu.tempC.has_value())
                     row.Add(sep, "cpuTemp", StrFmt("%.0f C", cpu.tempC.value()), tempColor(cpu.tempC.value()));
+
+                if (config->FpsOverlayShowCpuHotspot.value_or_default() && cpu.hotspotC.has_value())
+                {
+                    if (row.hasAny)
+                        row.line.Label(sep);
+
+                    row.hasAny = true;
+                    row.line.Label(hotspotLabel)
+                        .Value("cpuHotspot", StrFmt("%.0f C", cpu.hotspotC.value()), tempColor(cpu.hotspotC.value()));
+                }
 
                 if (cpu.powerW.has_value())
                     row.Add(sep, "cpuPower", StrFmt("%.0f W", cpu.powerW.value()));
@@ -9104,6 +9126,14 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
 
             optionCheckbox("CPU & GPU Usage", config->FpsOverlayShowUsage,
                            "Adds the usage percentage to the GPU and CPU rows, as Task Manager shows it");
+
+            optionCheckbox("GPU Hotspot", config->FpsOverlayShowGpuHotspot,
+                           "Adds the GPU's hottest sensor to the GPU row: AMD junction temperature,\n"
+                           "NVIDIA hot spot (not reported by RTX 50 GPUs), or HWiNFO / Afterburner's");
+
+            optionCheckbox("CPU Hotspot", config->FpsOverlayShowCpuHotspot,
+                           "Adds the CPU's hottest core or CCD to the CPU row.\n"
+                           "Windows: from HWiNFO, MSI Afterburner or Core Temp. Linux: from the kernel's sensors");
 
             optionCheckbox("Session Timer", config->FpsOverlayShowSessionTimer,
                            "Adds how long OptiScaler has been running to the FPS row");
