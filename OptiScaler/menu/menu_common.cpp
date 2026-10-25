@@ -5521,6 +5521,13 @@ void MenuCommon::RenderFrameGenerationSelection(RenderMenuContext& ctx)
     outputOptions[flipMeterOutputIndex].set_disabled(primaryGpu.vendorId != VendorId::AMD, "Unsupported hardware");
     outputOptions[flipMeterOutputIndex].set_disabled(!state.amdFlipMeterSupported.value_or(true),
                                                      "Flip metering isn't supported by the driver");
+
+    // XeFG on Vulkan goes through D3D12, Vulkan=false in [XeFG] turns it off
+    auto constexpr xefgOutputIndex = (uint32_t) FGOutput::XeFG;
+    outputOptions[xefgOutputIndex].set_disabled(state.swapchainApi == API::Vulkan &&
+                                                    !config->FGXeFGVulkan.value_or_default(),
+                                                "Off in OptiScaler.ini ([XeFG] Vulkan)");
+
     // Unsupported FG input selected
     const auto currentInputIndex = (uint32_t) state.activeFgInput;
     if (config->FGInput != FGInput::NoFG && inputOptions.size() > currentInputIndex &&
