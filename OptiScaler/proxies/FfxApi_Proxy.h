@@ -16,7 +16,6 @@
 #include <fsr4/FSR4Models.h>
 #include <fsr4/FSR4Presets.h>
 #include <upscalers/CustomUpscalers.h>
-#include <extra_dlls/ExtraUpscalers_Dx12.h>
 
 #include "ffx_api.h"
 #include "FfxModule.h"
@@ -161,8 +160,7 @@ class FfxApiProxy
     static bool IsUpscalerModule(HMODULE module)
     {
         return module != nullptr &&
-               (module == main_dx12.dll || module == upscaling_dx12.dll || IsCustomUpscalerModule(module) ||
-                ExtraUpscalersDx12::IsModule(module));
+               (module == main_dx12.dll || module == upscaling_dx12.dll || IsCustomUpscalerModule(module));
     }
 
     static bool IsCustomUpscalerModule(HMODULE module)
@@ -178,9 +176,6 @@ class FfxApiProxy
     // Module that runs the DX12 upscaler with this version id
     static HMODULE UpscalerModule(uint64_t versionId)
     {
-        if (auto extra = ExtraUpscalersDx12::Module(versionId); extra != nullptr)
-            return extra;
-
         if (versionId != 0 && versionId == FSR4DriverProviderDx12::VersionId())
             return FSR4DriverProviderDx12::LoadedModule();
 
@@ -1301,12 +1296,6 @@ class FfxApiProxy
     {
         auto type = GetType(desc->type);
 
-        if (auto overrideVersion = FindOverrideVersion(desc);
-            type == FFXStructType::Upscaling && overrideVersion && ExtraUpscalersDx12::HasVersion(*overrideVersion))
-        {
-            return ExtraUpscalersDx12::CreateContext(*overrideVersion, context, desc, memCb);
-        }
-
         if (auto overrideVersion = FindOverrideVersion(desc); type == FFXStructType::Upscaling && overrideVersion &&
                                                               *overrideVersion == FSR4DriverProviderDx12::VersionId())
         {
@@ -1377,9 +1366,6 @@ class FfxApiProxy
 
     static ffxReturnCode_t D3D12_DestroyContext(ffxContext* context, const ffxAllocationCallbacks* memCb)
     {
-        if (ExtraUpscalersDx12::OwnsContext(context))
-            return ExtraUpscalersDx12::DestroyContext(context, memCb);
-
         if (FSR4DriverProviderDx12::OwnsContext(context))
             return FSR4DriverProviderDx12::DestroyContext(context, memCb);
 
@@ -1491,9 +1477,6 @@ class FfxApiProxy
 
     static ffxReturnCode_t D3D12_Configure(ffxContext* context, const ffxConfigureDescHeader* desc)
     {
-        if (ExtraUpscalersDx12::OwnsContext(context))
-            return ExtraUpscalersDx12::Configure(context, desc);
-
         if (FSR4DriverProviderDx12::OwnsContext(context))
             return FSR4DriverProviderDx12::Configure(context, desc);
 
@@ -1541,9 +1524,6 @@ class FfxApiProxy
 
     static ffxReturnCode_t D3D12_Query(ffxContext* context, ffxQueryDescHeader* desc)
     {
-        if (ExtraUpscalersDx12::OwnsContext(context))
-            return ExtraUpscalersDx12::Query(context, desc);
-
         if (FSR4DriverProviderDx12::OwnsContext(context))
             return FSR4DriverProviderDx12::Query(context, desc);
 
@@ -1584,10 +1564,6 @@ class FfxApiProxy
         names.resize(sdkCount);
 
         FSR4DriverProviderDx12::AddToVersionList(ids, names, driverListing);
-
-        // The Extra dlls folder's upscalers are only offered in the menu
-        if (driverListing == FSR4DriverProviderDx12::Listing::Always)
-            ExtraUpscalersDx12::AddToVersionList(ids, names, desc->device);
 
         if (desc->outputCount == nullptr)
             return FFX_API_RETURN_ERROR_PARAMETER;
@@ -1719,9 +1695,6 @@ class FfxApiProxy
   public:
     static ffxReturnCode_t D3D12_Dispatch(ffxContext* context, const ffxDispatchDescHeader* desc)
     {
-        if (ExtraUpscalersDx12::OwnsContext(context))
-            return ExtraUpscalersDx12::Dispatch(context, desc);
-
         if (FSR4DriverProviderDx12::OwnsContext(context))
             return FSR4DriverProviderDx12::Dispatch(context, desc);
 

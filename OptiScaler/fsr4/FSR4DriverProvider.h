@@ -101,9 +101,6 @@ class FSR4DriverDll
     // first, before any FFX dll of the game
     FSR4DriverDll(const wchar_t* name, std::vector<std::wstring> sdkModules);
 
-    // A copy at that path only, like the ones in the Extra dlls folder
-    FSR4DriverDll(const wchar_t* name, std::vector<std::wstring> sdkModules, std::filesystem::path path);
-
     FSR4DriverDll(const FSR4DriverDll&) = delete;
     FSR4DriverDll& operator=(const FSR4DriverDll&) = delete;
 
@@ -126,7 +123,6 @@ class FSR4DriverDll
   private:
     std::wstring _name;
     std::vector<std::wstring> _sdkModules;
-    std::filesystem::path _path;
 
     HMODULE _module = nullptr;
     PFN_UpdateFfxApiProvider _updateFfxApiProvider = nullptr;

@@ -1067,9 +1067,6 @@
     <ClInclude Include="shaders\magnifier\Magnifier_Dx11.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="extra_dlls\ExtraUpscalers_Dx12.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="gpu_time\FGGpuTime_Dx12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1839,9 +1836,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="shaders\magnifier\Magnifier_Dx11.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="extra_dlls\ExtraUpscalers_Dx12.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="gpu_time\FGGpuTime_Dx12.cpp">
