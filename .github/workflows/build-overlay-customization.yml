@@ -1,5 +1,6 @@
 name: Build overlay customization test DLL
 on:
+  workflow_dispatch:
   push:
     branches: [ "ci/build-venom-custom-upscalers" ]
 permissions:
