@@ -48,6 +48,7 @@
 #include <proxies/Dxgi_Proxy.h>
 #include <misc/FrameLimit.h>
 #include <dxgi1_4.h>
+#include "menu_hdr_dx12.h"
 
 enum class UiTargetMode
 {
@@ -1992,6 +1993,10 @@ static ImVec4 StatusError() { return toneMapColor(ImVec4(1.f, 0.f, 0.f, 1.f)); }
 
 static ImVec4 toneMapColor(const ImVec4& color)
 {
+    // Converted to the HDR output by the DX12 composite pass
+    if (MenuHdr_Dx12::IsActive())
+        return color;
+
     const auto mode = getUiTargetMode();
 
     switch (mode)
