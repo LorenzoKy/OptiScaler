@@ -38,6 +38,9 @@ constexpr UINT SlotCount = 64;
 // A list XeFG never ended frees its slot after this many frames
 constexpr UINT64 OpenFrames = 8;
 
+// A list that ended but never ran frees its slot after this many frames
+constexpr UINT64 StaleFrames = 120;
+
 // After the timing starts, the lists per frame and their times are logged once
 constexpr double DiagnosticsMs = 3000.0;
 
@@ -404,7 +407,20 @@ double XeFGGpuTime_Dx12::Collect()
     {
         auto& slot = slots[index];
 
-        if (!slot.pending || data[index * 2] == 0 || data[index * 2 + 1] == 0)
+        if (!slot.pending)
+            continue;
+
+        // A list XeFG recorded but never executed would keep its slot forever
+        if (frameNumber - slot.frame > StaleFrames)
+        {
+            data[index * 2] = 0;
+            data[index * 2 + 1] = 0;
+            writtenEnd = (index + 1) * 2 * sizeof(UINT64);
+            slot = {};
+            continue;
+        }
+
+        if (data[index * 2] == 0 || data[index * 2 + 1] == 0)
             continue;
 
         const UINT64 start = data[index * 2];
