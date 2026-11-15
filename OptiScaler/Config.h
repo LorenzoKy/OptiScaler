@@ -445,6 +445,7 @@ class Config
     CustomOptional<bool> FpsOverlayShowCpuHotspot { false };   // The CPU's hottest core or CCD on its row
     CustomOptional<bool> FpsOverlayShowClock { false };        // Date and time row
     CustomOptional<bool> FpsOverlayShowSessionTimer { false }; // Time since OptiScaler started, on the FPS row
+    CustomOptional<bool> FpsOverlayShowBaseFps { true };       // With frame generation also the real frame rate
     CustomOptional<bool> FpsOverlayShowUpscalerName { true };  // Input -> upscaler and its version, Upscale or FPS row
     // A graph row also needs its switch, on any overlay type
     CustomOptional<bool> FpsOverlayShowFrameTimeGraph { true };

@@ -3418,8 +3418,9 @@ void MenuCommon::RenderPerformanceOverlay(RenderMenuContext& ctx)
                 shownAt = now;
             }
 
-            // With an FG input also the measured base frame rate, the same as FPS shows that FG isn't generating
-            const std::string fpsValue = shown.baseFrameTime > 0.0
+            // With an FG input also the measured base frame rate, the same as FPS shows that FG isn't generating.
+            // FpsOverlayShowBaseFps off shows only the output frame rate
+            const std::string fpsValue = shown.baseFrameTime > 0.0 && config->FpsOverlayShowBaseFps.value_or_default()
                                              ? StrFmt("%.1f/%.1f", shown.frameRate, 1000.0 / shown.baseFrameTime)
                                              : StrFmt("%.1f", shown.frameRate);
 
@@ -9741,6 +9742,11 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
 
                 optionCheckbox("Session Timer", config->FpsOverlayShowSessionTimer,
                                "Adds how long OptiScaler has been running to the FPS row");
+
+                optionCheckbox("Base FPS", config->FpsOverlayShowBaseFps,
+                               "With frame generation the FPS row shows the output and the real frame rate "
+                               "(120.0/60.0).\nOff shows only the output frame rate, generated frames included "
+                               "(120.0)");
 
                 optionCheckbox("Upscale Inputs", config->FpsOverlayShowUpscalerName,
                                "The input and the upscaler with its version (DLSS -> FSR 4.0.3):\n"

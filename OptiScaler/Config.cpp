@@ -1030,6 +1030,7 @@ static const OverlayIniKey venomOverlayIniKeys[] = {
     { "FpsOverlayShowUpscalerTimeGraph", OverlayValueType::Bool },
     { "FpsOverlayShowFGTimeGraph", OverlayValueType::Bool },
     { "FpsOverlayShowLatencyGraph", OverlayValueType::Bool },
+    { "FpsOverlayShowBaseFps", OverlayValueType::Bool },
 };
 static_assert(std::size(overlayIniKeys) <= venomKeyBase && venomKeyBase + std::size(venomOverlayIniKeys) <= 0x100);
 
@@ -1109,6 +1110,7 @@ void Config::ReadOverlaySettings(bool assign)
     apply(FpsOverlayShowCpuHotspot, readBool("Menu", "FpsOverlayShowCpuHotspot"));
     apply(FpsOverlayShowClock, readBool("Menu", "FpsOverlayShowClock"));
     apply(FpsOverlayShowSessionTimer, readBool("Menu", "FpsOverlayShowSessionTimer"));
+    apply(FpsOverlayShowBaseFps, readBool("Menu", "FpsOverlayShowBaseFps"));
     apply(FpsOverlayShowUpscalerName, readBool("Menu", "FpsOverlayShowUpscalerName"));
     apply(FpsOverlayShowFrameTimeGraph, readBool("Menu", "FpsOverlayShowFrameTimeGraph"));
     apply(FpsOverlayShowUpscalerTimeGraph, readBool("Menu", "FpsOverlayShowUpscalerTimeGraph"));
@@ -1171,6 +1173,7 @@ void Config::WriteOverlaySettings()
     ini.SetValue("Menu", "FpsOverlayShowClock", GetBoolValue(FpsOverlayShowClock.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayShowSessionTimer",
                  GetBoolValue(FpsOverlayShowSessionTimer.value_for_config()).c_str());
+    ini.SetValue("Menu", "FpsOverlayShowBaseFps", GetBoolValue(FpsOverlayShowBaseFps.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayShowUpscalerName",
                  GetBoolValue(FpsOverlayShowUpscalerName.value_for_config()).c_str());
     ini.SetValue("Menu", "FpsOverlayShowFrameTimeGraph",
