@@ -9821,6 +9821,7 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                 const char* name;
                 const char* tip;
                 const char* settings;
+                bool venom = false; // Sets every setting itself and the Custom overlay type
             };
 
             static const OverlayPreset presets[] = {
@@ -9841,21 +9842,74 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                   "Pos=4;Type=7;Horizontal=true;Rows=upscale,-frametime,-frametimegraph,fps,upscaler,"
                   "-upscalergraph,-lowlatency;FpsRow=1;Alpha=0.12;Font=unispace bd.ttf;ValueColor=0xC9DF21;"
                   "ShadowStrength=0.59;ShadowColor=0x866767;Rounding=7;HideAverages=true" },
+                // The Venom presets list every overlay setting, nothing is left to the defaults or the ini
                 { "Venom",
-                  "Every Venom metric, ready to use: FPS with lows, upscaler, PC and render latency,\n"
-                  "FG time, bottleneck, VRAM, GPU, CPU and RAM with usage and hotspots",
-                  "Type=7;Rows=fps,upscale,frametime,upscaler,latency,fgtime,bottleneck,vram,gpu,cpu,ram;"
-                  "FpsRow=2;ShowLows=true;ShowUsage=true;ShowGpuHotspot=true;ShowCpuHotspot=true;"
-                  "ShowFGTimeGraph=true;LatencyType=2;UpdateInterval=250;Alpha=0.5;Rounding=6" },
+                  "Every Venom metric, clean and readable: Custom rows with FPS, lows and base FPS,\n"
+                  "upscaler, PC and render latency, FG time, bottleneck, VRAM, GPU, CPU and RAM\n"
+                  "with usage and hotspots. Segoe UI on a dark panel, top left, frame time graph",
+                  "OverlaysUseTheme=false;Pos=0;Type=7;Horizontal=false;ShowRatio=true;CompactLabels=false;"
+                  "Rows=fps,upscale,frametime,frametimegraph,upscaler,-upscalergraph,latency,-latencygraph,"
+                  "fgtime,-fgtimegraph,bottleneck,vram,gpu,cpu,ram,-clock,-lowlatency;FpsRow=2;RowSpacing=3;"
+                  "UpdateInterval=250;Alpha=0.55;FpsScale=1;GraphHeight=1;PosX=0;PosY=0;Font=segoeui.ttf;"
+                  "FontSize=15;LetterSpacing=0;LabelScale=0.9;ValueScale=1;LabelColor=0xB8C0CC;"
+                  "ValueColor=0xFFFFFF;GraphColor=0x5CFF9D;BGColor=0x101317;Shadow=1;ShadowStrength=0.5;"
+                  "ShadowColor=0x000000;Rounding=6;HideAverages=false;ShowLows=true;ShowLatency=true;"
+                  "LatencyType=2;ShowFGTime=true;ShowFpsCost=false;ShowPointOneLow=true;ShowBottleneck=true;"
+                  "ShowVram=true;ShowGpu=true;ShowCpu=true;ShowRam=true;ShowGameRam=true;ShowCommitRam=false;"
+                  "ShowHardwareNames=false;ShowUsage=true;ShowClock=false;ShowSessionTimer=false;"
+                  "ShowGpuHotspot=true;ShowCpuHotspot=true;ShowUpscalerName=true;ShowFrameTimeGraph=true;"
+                  "ShowUpscalerTimeGraph=false;ShowFGTimeGraph=false;ShowLatencyGraph=false;ShowBaseFps=true",
+                  true },
                 { "Venom Style",
-                  "Every Venom metric with Venom's own look: Segoe UI Semibold,\n"
-                  "venom green labels, soft shadow, dark rounded panel",
-                  "Type=7;Rows=fps,upscale,frametime,upscaler,latency,fgtime,bottleneck,vram,gpu,cpu,ram;"
-                  "FpsRow=2;ShowLows=true;ShowUsage=true;ShowGpuHotspot=true;ShowCpuHotspot=true;"
-                  "ShowFGTimeGraph=true;LatencyType=2;UpdateInterval=250;Font=seguisb.ttf;FontSize=15;"
-                  "LetterSpacing=0.2;LabelScale=0.85;ValueScale=1.05;LabelColor=0x8CE65A;ValueColor=0xF2F5F7;"
-                  "GraphColor=0x5CFF9D;BGColor=0x0B0E12;Alpha=0.6;Shadow=1;ShadowStrength=0.6;"
-                  "ShadowColor=0x000000;Rounding=12" },
+                  "Every Venom metric with Venom's own look: Segoe UI Semibold, venom green labels,\n"
+                  "frame time, FG time and latency graphs in green, soft shadow, dark rounded panel,\n"
+                  "hardware names and the session timer",
+                  "OverlaysUseTheme=false;Pos=0;Type=7;Horizontal=false;ShowRatio=true;CompactLabels=false;"
+                  "Rows=fps,upscale,frametime,frametimegraph,upscaler,-upscalergraph,latency,latencygraph,"
+                  "fgtime,fgtimegraph,bottleneck,vram,gpu,cpu,ram,-clock,-lowlatency;FpsRow=2;RowSpacing=4;"
+                  "UpdateInterval=250;Alpha=0.6;FpsScale=1;GraphHeight=1.2;PosX=0;PosY=0;Font=seguisb.ttf;"
+                  "FontSize=15;LetterSpacing=0.2;LabelScale=0.85;ValueScale=1.05;LabelColor=0x8CE65A;"
+                  "ValueColor=0xF2F5F7;GraphColor=0x5CFF9D;BGColor=0x0B0E12;Shadow=1;ShadowStrength=0.6;"
+                  "ShadowColor=0x000000;Rounding=12;HideAverages=false;ShowLows=true;ShowLatency=true;"
+                  "LatencyType=2;ShowFGTime=true;ShowFpsCost=false;ShowPointOneLow=true;ShowBottleneck=true;"
+                  "ShowVram=true;ShowGpu=true;ShowCpu=true;ShowRam=true;ShowGameRam=true;ShowCommitRam=false;"
+                  "ShowHardwareNames=true;ShowUsage=true;ShowClock=false;ShowSessionTimer=true;"
+                  "ShowGpuHotspot=true;ShowCpuHotspot=true;ShowUpscalerName=true;ShowFrameTimeGraph=true;"
+                  "ShowUpscalerTimeGraph=false;ShowFGTimeGraph=true;ShowLatencyGraph=true;ShowBaseFps=true",
+                  true },
+                { "Venom Strip",
+                  "The Venom metrics that matter while playing, in one strip at the top center:\n"
+                  "FPS with base FPS and 1% low, frame time, latency, FG time, VRAM, GPU and CPU.\n"
+                  "Compact labels, Segoe UI Semibold, venom green values, no graphs",
+                  "OverlaysUseTheme=false;Pos=4;Type=7;Horizontal=true;ShowRatio=false;CompactLabels=true;"
+                  "Rows=fps,-upscale,frametime,-frametimegraph,-upscaler,-upscalergraph,latency,-latencygraph,"
+                  "fgtime,-fgtimegraph,-bottleneck,vram,gpu,cpu,-ram,-clock,-lowlatency;FpsRow=2;RowSpacing=8;"
+                  "UpdateInterval=250;Alpha=0.45;FpsScale=1;GraphHeight=1;PosX=0.5;PosY=0;Font=seguisb.ttf;"
+                  "FontSize=14;LetterSpacing=0.2;LabelScale=0.85;ValueScale=1.05;LabelColor=0xD0D6DE;"
+                  "ValueColor=0x8CE65A;GraphColor=0x5CFF9D;BGColor=0x0B0E12;Shadow=1;ShadowStrength=0.6;"
+                  "ShadowColor=0x000000;Rounding=10;HideAverages=true;ShowLows=true;ShowLatency=true;"
+                  "LatencyType=0;ShowFGTime=true;ShowFpsCost=false;ShowPointOneLow=false;ShowBottleneck=false;"
+                  "ShowVram=true;ShowGpu=true;ShowCpu=true;ShowRam=false;ShowGameRam=false;ShowCommitRam=false;"
+                  "ShowHardwareNames=false;ShowUsage=true;ShowClock=false;ShowSessionTimer=false;"
+                  "ShowGpuHotspot=false;ShowCpuHotspot=false;ShowUpscalerName=false;ShowFrameTimeGraph=false;"
+                  "ShowUpscalerTimeGraph=false;ShowFGTimeGraph=false;ShowLatencyGraph=false;ShowBaseFps=true",
+                  true },
+                { "Hybrid",
+                  "Every Venom metric in Hybrid Launcher's colors: crimson labels and graphs,\n"
+                  "ivory values on its charcoal panel, Segoe UI Semibold, rounded corners",
+                  "OverlaysUseTheme=false;Pos=0;Type=7;Horizontal=false;ShowRatio=true;CompactLabels=false;"
+                  "Rows=fps,upscale,frametime,frametimegraph,upscaler,-upscalergraph,latency,latencygraph,"
+                  "fgtime,-fgtimegraph,bottleneck,vram,gpu,cpu,ram,-clock,-lowlatency;FpsRow=2;RowSpacing=4;"
+                  "UpdateInterval=250;Alpha=0.75;FpsScale=1;GraphHeight=1.1;PosX=0;PosY=0;Font=seguisb.ttf;"
+                  "FontSize=15;LetterSpacing=0.1;LabelScale=0.85;ValueScale=1.05;LabelColor=0xD7143A;"
+                  "ValueColor=0xF4EFE4;GraphColor=0xE0142B;BGColor=0x17181C;Shadow=1;ShadowStrength=0.5;"
+                  "ShadowColor=0x000000;Rounding=10;HideAverages=false;ShowLows=true;ShowLatency=true;"
+                  "LatencyType=2;ShowFGTime=true;ShowFpsCost=false;ShowPointOneLow=true;ShowBottleneck=true;"
+                  "ShowVram=true;ShowGpu=true;ShowCpu=true;ShowRam=true;ShowGameRam=true;ShowCommitRam=false;"
+                  "ShowHardwareNames=false;ShowUsage=true;ShowClock=false;ShowSessionTimer=false;"
+                  "ShowGpuHotspot=true;ShowCpuHotspot=true;ShowUpscalerName=true;ShowFrameTimeGraph=true;"
+                  "ShowUpscalerTimeGraph=false;ShowFGTimeGraph=false;ShowLatencyGraph=true;ShowBaseFps=true",
+                  true },
             };
 
             // Four buttons per line
@@ -9871,7 +9925,13 @@ void MenuCommon::RenderFpsOverlaySettings(RenderMenuContext& ctx)
                     ImGui::SameLine();
 
                 if (ImGui::Button(presets[i].name, ImVec2(buttonWidth, 0.0f)))
+                {
                     config->ApplyOverlaySettings(presets[i].settings);
+
+                    // Their rows are the Custom ones, whatever the code holds
+                    if (presets[i].venom)
+                        config->FpsOverlayType = FpsOverlay_Custom;
+                }
 
                 ShowTooltip(presets[i].tip);
             }
